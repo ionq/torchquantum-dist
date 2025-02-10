@@ -4,6 +4,7 @@ import torch
 import torch.distributed
 import torchquantum as tq
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor import distribute_tensor, init_device_mesh, Shard
 from torch.distributed.tensor.placement_types import Placement
 from torchquantum.macro import C_DTYPE
 
@@ -16,8 +17,8 @@ class DistributedQuantumDevice(tq.QuantumDevice):
         bsz: int = 1,
         device: Union[torch.device, str] = "cpu",
         record_op: bool = False,
-        device_mesh: Optional[DeviceMesh] = None,
-        placements: Optional[List[Placement]] = None
+        world_sz: int = 1,
+        placements: Optional[List[Placement]] = [Shard(0)]
     ):
         """A quantum device that contains the quantum state vector.
         Args:
@@ -28,7 +29,7 @@ class DistributedQuantumDevice(tq.QuantumDevice):
             record_op: whether to record the operations on the quantum device and then
                 they can be used to construct a static computation graph
         """
-        super().__init__()
+        super().__init__(n_wires)
         # number of qubits
         # the states are represented in a multi-dimension tensor
         # from left to right: qubit 0 to n
@@ -36,7 +37,7 @@ class DistributedQuantumDevice(tq.QuantumDevice):
         self.device_name = device_name
         self.bsz = bsz
         self.device = device
-        self.device_mesh = device_mesh
+        self.device_mesh = init_device_mesh(device, (world_sz,))
         self.placements = placements
 
         _state = torch.zeros(2**self.n_wires, dtype=C_DTYPE)
@@ -48,9 +49,9 @@ class DistributedQuantumDevice(tq.QuantumDevice):
         self._states = self.state.repeat(*repeat_times)  # type: ignore
 
         # make this distributed pytorch>=2.5
-        self._states = torch.distributed.tensor.DTensor.from_local(
+        self._states = distribute_tensor(
             self._states,
-            device_mesh=device_mesh,
+            device_mesh=self.device_mesh,
             placements=placements,
         )
 
