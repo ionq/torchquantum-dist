@@ -2,19 +2,36 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from torch.distributed.device_mesh import init_device_mesh
-from distributed_quantum_device import DistributedQuantumDevice
+import torch
+from torch.distributed.tensor import distribute_tensor, Replicate, Shard
+
+import tqd
+from tqd import DistributedQuantumDevice
 
 def test_dqd():
-    nq = 32
-    device_mesh = init_device_mesh(
-        'gpu',
-        (2,)
-    )
-    placements = {}
-    DistributedQuantumDevice(
+    rank = os.environ['LOCAL_RANK']
+    nq = 3
+    world_sz = 2
+    qdev = DistributedQuantumDevice(
         nq,
-        device="gpu",
-        device_mesh=device_mesh,
-        placements=placements
+        device=f'cuda',
+        world_sz=world_sz
     )
+    #print(qdev.states @ torch.ones((2,2), dtype=torch.float, device=f'cuda:{rank}'))
+    #print(torch.einsum('...ij,...jk->...ik', qdev.states, torch.ones((2,2), device=f'cuda:{rank}')))
+    #print(qdev.states @ distribute_tensor(torch.ones((2,2), dtype=torch.float), device_mesh=qdev.device_mesh, placements=[Replicate()]))
+    #print(torch.einsum('...ij,...jk->...ik', qdev.states, distribute_tensor(torch.ones((2,2), dtype=torch.float), device_mesh=dqd.device_mesh, placements=[Replicate()])))
+    qdev.y(wires=[0])
+
+    x_gate = tqd.X(wires=[0])
+    x_gate(qdev)
+    
+    qdev.rz(wires=[0], params=torch.ones(1)*torch.pi/3)
+    
+    print(f'after {rank} {qdev.states}')
+    #print(f'done {qdev.states}')
+    print(f'done {qdev.states.full_tensor()}')
+
+
+if __name__ == "__main__":
+    test_dqd()
