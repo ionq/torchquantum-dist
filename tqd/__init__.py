@@ -1,3 +1,7 @@
 from .device import DistributedQuantumDevice
-from .functional import x, y, z, cy, cx, cz, rx, ry, rz
-from .operator import X, Y, Z, CY, CX, CZ, RX, RY, RZ
+from . import functional
+from . import operator
+
+for name_ in functional.FUNC_NAMES:
+    vars()[name_] = getattr(functional, name_)
+    vars()[name_.upper()] = getattr(operator, name_.upper())
