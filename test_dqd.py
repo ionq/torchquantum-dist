@@ -3,23 +3,32 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import torch
+from torch.distributed.tensor import distribute_tensor, Replicate, Shard
+
+import distributed_quantum_device as dqd
 from distributed_quantum_device import DistributedQuantumDevice
 
 def test_dqd():
     rank = os.environ['LOCAL_RANK']
     nq = 3
     world_sz = 2
-    dqd = DistributedQuantumDevice(
+    qdev = DistributedQuantumDevice(
         nq,
         device=f'cuda',
         world_sz=world_sz
     )
+    #print(qdev.states @ torch.ones((2,2), dtype=torch.float, device=f'cuda:{rank}'))
+    #print(torch.einsum('...ij,...jk->...ik', qdev.states, torch.ones((2,2), device=f'cuda:{rank}')))
+    #print(qdev.states @ distribute_tensor(torch.ones((2,2), dtype=torch.float), device_mesh=qdev.device_mesh, placements=[Replicate()]))
+    #print(torch.einsum('...ij,...jk->...ik', qdev.states, distribute_tensor(torch.ones((2,2), dtype=torch.float), device_mesh=dqd.device_mesh, placements=[Replicate()])))
 
-    dqd.x(wires=[0])
-    print(f'after {rank} {dqd.lin.weight}')
+    dqd.X(wires=[0])(qdev)
+    qdev.rz(wires=[0], params=torch.ones(1)*torch.pi/3)
+    print(f'after {rank} {qdev.states}')
     if rank == '0':
-        print(f'done {dqd.lin.weight}')
-        #print(f'done {dqd.lin.weight.full_tensor()}')
+        #print(f'done {qdev.states}')
+        #print(f'done {qdev.states.full_tensor()}')
+        pass
 
 
 if __name__ == "__main__":
