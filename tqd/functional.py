@@ -1,73 +1,29 @@
 import functools
 import importlib
 import itertools
-import os
-from functools import partial, partialmethod
-from typing import Callable, Union
+from typing import Callable
 
 import numpy as np
 import torch
 import torch.distributed
 import torch.distributed.tensor
-from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import DTensor, Replicate, Shard, distribute_tensor
+from torch.distributed.tensor import Replicate, Shard, distribute_tensor
 from torchquantum.macro import ABC, ABC_ARRAY, F_DTYPE
 
-PAULIS = {}
-RS = {}
-for letter in ['x', 'y', 'z']:
-    PAULIS[letter] = importlib.import_module(f'.pauli{letter}', f'torchquantum.functional')
-    RS[letter] = importlib.import_module(f'.r{letter}', f'torchquantum.functional')
+XYZ = ['x', 'y', 'z']
 
-class DistributedQuantumDevice:
-    def __init__(
-        self,
-        n_wires: int,
-        device_name: str = "default",
-        device: Union[torch.device, str] = "cuda",
-        record_op: bool = False,
-        world_sz: int = 1,
-    ):
-        """A quantum device that contains the quantum state vector.
-        Args:
-            n_wires: number of qubits
-            device_name: name of the quantum device
-            bsz: batch size of the quantum state
-            device: which classical computing device to use, 'cpu' or 'cuda'
-            record_op: whether to record the operations on the quantum device and then
-                they can be used to construct a static computation graph
-        """
-        # number of qubits
-        # the states are represented in a multi-dimension tensor
-        # from left to right: qubit 0 to n
-        bsz = 2  # batch ix 0 is real, batch ix 1 is imag
-        self.n_wires = n_wires
-        self.device_name = device_name + "_distributed"
-        self.bsz = bsz
-        self.device = device
+# modules from torchquantum
+TQ_PAULIS = {}
+TQ_RS = {}
+for letter_ in XYZ:
+    TQ_PAULIS[letter_] = importlib.import_module(f'.pauli{letter_}', f'torchquantum.functional')
+    TQ_RS[letter_] = importlib.import_module(f'.r{letter_}', f'torchquantum.functional')
 
-        self.record_op = record_op
-        self.op_history = []
+PAULI_NAMES = [a + b for a,b in itertools.product(['c', ''], XYZ)] 
+ROT_NAMES = ['r' + b for b in XYZ]
 
-        # set up distributed
-        self.world_sz = world_sz
-        rank = os.environ['LOCAL_RANK']
-        self.rank = rank
-        torch.cuda.set_device(f'{device}:{rank}')
-        torch.distributed.init_process_group(world_size=world_sz)
-        self.device_mesh = init_device_mesh(device, (world_sz,))
-
-        self.log2_devices = int(np.ceil(np.log2(world_sz)))
-        self.local_shape = (2, ) + (1, ) * self.log2_devices + (2, ) * (self.n_wires - self.log2_devices)
-        self.full_shape = (2, ) + (2, ) * self.n_wires
-        _states = torch.zeros(self.local_shape)
-        self.placements = [Shard(i+1) for i in range(self.log2_devices)]
-        if self.rank == '0':
-            _states[(0,) * _states.ndim] = 1
-        self.states = DTensor.from_local(_states, self.device_mesh, self.placements)
-
-    def __del__(self):
-        torch.distributed.destroy_process_group()
+# list of all the lower case functions we've ported
+FUNC_NAMES = ROT_NAMES + PAULI_NAMES
 
 def apply_unitary_einsum(state, mat, wires):
     """Apply the unitary to the statevector using torch.einsum method.
@@ -96,6 +52,7 @@ def apply_unitary_einsum(state, mat, wires):
 
     mat = mat.view(shape_extension + [2] * len(device_wires) * 2)
 
+    #TODO: do something smarter here
     mat = distribute_tensor(mat, state.device_mesh, [Replicate()])
 
     # Tensor indices of the quantum state
@@ -197,7 +154,7 @@ def rot(
     name,  # rx, ry, or rz
     q_device, wires, params=None, comp_method="einsum",
 ):
-    mat = getattr(RS[name[-1]], f'{name}_matrix')
+    mat = getattr(TQ_RS[name[-1]], f'{name}_matrix')
     gate_wrapper(
         name=name, mat=mat, method=comp_method, q_device=q_device,
         wires=wires, params=params,
@@ -208,60 +165,14 @@ def pauli(
     q_device, wires, params=None, comp_method="einsum",
 ):
     full_name = f'pauli{name}' if len(name) == 1 else name
-    mat = getattr(PAULIS[name[-1]], f'_{name[-1]}_mat_dict')[full_name]
+    mat = getattr(TQ_PAULIS[name[-1]], f'_{name[-1]}_mat_dict')[full_name]
     gate_wrapper(
         name=name, mat=mat, method=comp_method, q_device=q_device,
         wires=wires, params=None,
     )
 
-pauli_names = [a + b for a,b in itertools.product(['c', ''], ['x', 'y', 'z'])] 
-rot_names = ['r' + b for b in ['x', 'y', 'z']]
-# populate namespace
-for name_ in pauli_names:
-    vars()[name_] = partial(pauli, name_)
-for name_ in rot_names:
-    vars()[name_] = partial(rot, name_)
-
-func_names = rot_names + pauli_names
-
-# set all to einsum
-for name_ in func_names:
-    func_einsum = partialmethod(eval(name_), comp_method="einsum")
-    setattr(DistributedQuantumDevice, name_, func_einsum)
-
-class Op(torch.nn.Module):
-    def __init__(self, func, wires, has_params=True, trainable=True, **unused):
-        super().__init__()
-        self.func_ = func
-        self.wires = wires
-        self.has_params = has_params
-        self.trainable = trainable
-        self.params = None
-        if has_params:
-            self.params = torch.empty(1)
-            if trainable:
-                self.params = torch.nn.Parameter(self.params)
-    
-    def forward(self, qdev, wires=None, params=None):
-        self.func_(
-            qdev,
-            wires if wires is not None else self.wires,
-            params=params if params is not None else self.params
-        )
-
-def OpFactory(name, has_params=True, trainable=True):
-    """
-    programattically creates RY from ry, CX from cx, etc
-    `name` is lower case
-    """
-    def __init__(self, wires, **kwargs):
-        kwargs.update({'has_params': kwargs.get('has_params', has_params)})
-        kwargs.update({'trainable': kwargs.get('trainable', trainable)})
-        Op.__init__(self, eval(name), wires, **kwargs)
-    newclass = type(name.upper(), (Op, ), {"__init__": __init__})
-    return newclass
-
-for name_ in rot_names:
-    vars()[name_.upper()] = OpFactory(name_)
-for name_ in pauli_names:
-    vars()[name_.upper()] = OpFactory(name_, has_params=False, trainable=False)
+# populate namespace with functionals
+for name_ in PAULI_NAMES:
+    vars()[name_] = functools.partial(pauli, name_)
+for name_ in ROT_NAMES:
+    vars()[name_] = functools.partial(rot, name_)

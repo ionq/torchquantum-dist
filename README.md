@@ -1,7 +1,7 @@
 # Torch Multi-GPU statevector support
 Extension of `torchquantum` (henceforth `tq`) to allow multi-GPU distributed statevector using `DTensor` from `torch.distributed`
 
-`distributed_quantum_device.py` provides:
+`tqd` provides:
   - `DistributedQuantumDevice`, similar to `QuantumDevice`, but allowing statevector to be distributed across multiple GPUS
   - Gates similar to those in `tq.functional` that operate on `DistributedQuantumDevice` (e.g. `x`, `cy`, `rz`)
   - Modules defining gates and containing trainable parameters similar to those in `tq.operator` (e.g. `X`, `CY`, `RZ`)
@@ -20,3 +20,6 @@ In a GCP VM n-standard-4 with 2x T4 GPUs, follow instructions to set up CUDA dri
 
 `torchrun --nproc-per-node=2 test_dqd.py`
 
+## Development
+Currently, it is assumed that gates have either 0 or 1 parameter.
+To further extend, simply create a new function and add it to `tqd.functional` and append to the list `tqd.FUNC_NAMES`. Operators automatically get created from functionals.
