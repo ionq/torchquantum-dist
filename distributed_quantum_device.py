@@ -195,7 +195,7 @@ def gate_wrapper(
 
 def rot(
     name,  # rx, ry, or rz
-    q_device, wires, params=None, comp_method="bmm",
+    q_device, wires, params=None, comp_method="einsum",
 ):
     mat = getattr(RS[name[-1]], f'{name}_matrix')
     gate_wrapper(
@@ -205,7 +205,7 @@ def rot(
 
 def pauli(
     name,  # (c)x, (c)y, or (c)z
-    q_device, wires, comp_method="bmm",
+    q_device, wires, params=None, comp_method="einsum",
 ):
     full_name = f'pauli{name}' if len(name) == 1 else name
     mat = getattr(PAULIS[name[-1]], f'_{name[-1]}_mat_dict')[full_name]
@@ -229,26 +229,39 @@ for name_ in func_names:
     func_einsum = partialmethod(eval(name_), comp_method="einsum")
     setattr(DistributedQuantumDevice, name_, func_einsum)
 
-## TODO: fix this
 class Op(torch.nn.Module):
-    def __init__(self, func, wires, has_params=True, trainable=True):
-        super.__init__(self)
-        self.func = func
+    def __init__(self, func, wires, has_params=True, trainable=True, **unused):
+        super().__init__()
+        self.func_ = func
         self.wires = wires
         self.has_params = has_params
         self.trainable = trainable
-        if has_params and trainable:
-            self.params = torch.nn.Parameter(torch.empty(1))
+        self.params = None
+        if has_params:
+            self.params = torch.empty(1)
+            if trainable:
+                self.params = torch.nn.Parameter(self.params)
     
     def forward(self, qdev, wires=None, params=None):
-        self.func(
+        self.func_(
             qdev,
             wires if wires is not None else self.wires,
-            params if params is not None else self.params
+            params=params if params is not None else self.params
         )
 
-        
+def OpFactory(name, has_params=True, trainable=True):
+    """
+    programattically creates RY from ry, CX from cx, etc
+    `name` is lower case
+    """
+    def __init__(self, wires, **kwargs):
+        kwargs.update({'has_params': kwargs.get('has_params', has_params)})
+        kwargs.update({'trainable': kwargs.get('trainable', trainable)})
+        Op.__init__(self, eval(name), wires, **kwargs)
+    newclass = type(name.upper(), (Op, ), {"__init__": __init__})
+    return newclass
+
 for name_ in rot_names:
-    vars()[name_.upper()] = partialmethod(Op.__init__, eval(name_))
+    vars()[name_.upper()] = OpFactory(name_)
 for name_ in pauli_names:
-    vars()[name_.upper()] = partialmethod(Op.__init__, eval(name_), has_params=False, trainable=False)
+    vars()[name_.upper()] = OpFactory(name_, has_params=False, trainable=False)
