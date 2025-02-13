@@ -3,12 +3,13 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import torch
+import torchquantum as tq
 from torch.distributed.tensor import distribute_tensor, Replicate, Shard
 
 import tqd
 from tqd import DistributedQuantumDevice
 
-def test_dqd():
+def test_dqd(verbose=False):
     rank = os.environ['LOCAL_RANK']
     nq = 3
     world_sz = 2
@@ -17,21 +18,39 @@ def test_dqd():
         device=f'cuda',
         world_sz=world_sz
     )
-    #print(qdev.states @ torch.ones((2,2), dtype=torch.float, device=f'cuda:{rank}'))
-    #print(torch.einsum('...ij,...jk->...ik', qdev.states, torch.ones((2,2), device=f'cuda:{rank}')))
-    #print(qdev.states @ distribute_tensor(torch.ones((2,2), dtype=torch.float), device_mesh=qdev.device_mesh, placements=[Replicate()]))
-    #print(torch.einsum('...ij,...jk->...ik', qdev.states, distribute_tensor(torch.ones((2,2), dtype=torch.float), device_mesh=dqd.device_mesh, placements=[Replicate()])))
-    qdev.y(wires=[0])
+    if verbose:
+        print(f'before {rank} {qdev.states}')
 
-    x_gate = tqd.X(wires=[0])
+    # test class method
+    qdev.y(wires=[2])
+
+    # test Module
+    x_gate = tqd.X(wires=[2])
     x_gate(qdev)
     
-    qdev.rz(wires=[0], params=torch.ones(1)*torch.pi/3)
+    # test functional
+    tqd.rz(qdev, wires=[2], params=torch.pi/3)
     
-    print(f'after {rank} {qdev.states}')
-    #print(f'done {qdev.states}')
-    print(f'done {qdev.states.full_tensor()}')
+    if verbose:
+        print(f'after {rank} {qdev.states}')
+        print(f'done {qdev.states.full_tensor()}')
 
+
+    # compare against ground truth
+    qdev_tq = tq.QuantumDevice(3)
+    qdev_tq.y(wires=[2])
+    qdev_tq.x(wires=[2])
+    qdev_tq.rz(wires=[2], params=torch.pi/3)
+
+    # remove singleton batch dimension and put complex split dimension in front to match our implementation
+    states_tq = torch.view_as_real(qdev_tq.states).permute([0,4,1,2,3])[0]
+    if verbose:
+        print(f'torchquantum {states_tq}')
+
+    assert(torch.allclose(states_tq, qdev.states.full_tensor().cpu()))
+
+    if rank == '0':
+        print('test passed!')
 
 if __name__ == "__main__":
     test_dqd()

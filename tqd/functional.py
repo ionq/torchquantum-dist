@@ -1,13 +1,14 @@
 import functools
 import importlib
 import itertools
-from typing import Callable
+import warnings
+from typing import Callable, Union
 
 import numpy as np
 import torch
 import torch.distributed
 import torch.distributed.tensor
-from torch.distributed.tensor import Replicate, Shard, distribute_tensor
+from torch.distributed.tensor import DTensor, Replicate, Shard, distribute_tensor
 from torchquantum.macro import ABC, ABC_ARRAY, F_DTYPE
 
 XYZ = ['x', 'y', 'z']
@@ -25,7 +26,40 @@ ROT_NAMES = ['r' + b for b in XYZ]
 # list of all the lower case functions we've ported
 FUNC_NAMES = ROT_NAMES + PAULI_NAMES
 
-def apply_unitary_einsum(state, mat, wires):
+def apply_unitary_bmm(state: DTensor, mat: torch.Tensor, wires: Union[int, list[int]]):
+    """Apply the unitary to the statevector using manually implemented broadcasted matrix multiply
+    in order to keep sharding semantics.
+
+    Args:
+        state (DTensor): The statevector as a real DTensor. 0th index is real part, 1st index is imaginary part
+        mat (torch.Tensor): The real or imaginary component of a unitary matrix of the operation as a real Tensor.
+        wires (int or List[int]): Which qubit(s) the operation is applied to.
+
+    Returns:
+        torch.Tensor: The new statevector.
+
+    """
+
+    gate_dims = [w + 1 for w in wires]
+    # TODO: deal with sharding in gate_dims
+    mat = distribute_tensor(mat, state.device_mesh, [Replicate()])
+
+    permute_to = list(range(state.dim()))
+    for d in sorted(gate_dims, reverse=True):
+        del permute_to[d]
+    permute_to = permute_to + gate_dims[::-1]
+    permute_back = list(np.argsort(permute_to))
+    permuted = state.permute(permute_to)
+
+    #permuted (b, ..., p, m)
+    #mat (n, m)
+    new_state = (mat * permuted.unsqueeze(-2)).sum(-1)
+
+    new_state = new_state.permute(permute_back)
+
+    return new_state
+
+def apply_unitary_einsum(state: DTensor, mat: torch.Tensor, wires: Union[int, list[int]]) -> DTensor:
     """Apply the unitary to the statevector using torch.einsum method.
 
     Args:
@@ -37,33 +71,28 @@ def apply_unitary_einsum(state, mat, wires):
         torch.Tensor: The new statevector.
 
     """
-    device_wires = wires
 
-    # minus one because of batch
-    total_wires = len(state.shape) - 1
+    # minus one because of batch dimension
+    nqubits = state.ndim - 1
 
-    if len(mat.shape) > 2:
-        is_batch_unitary = True
-        bsz = mat.shape[0]
-        shape_extension = [bsz]
-    else:
-        is_batch_unitary = False
-        shape_extension = []
+    mat_is_batched = mat.ndim > 2
+    shape_extension = [mat.shape[0]] if mat_is_batched else []
 
-    mat = mat.view(shape_extension + [2] * len(device_wires) * 2)
+    mat = mat.view(shape_extension + [2] * len(wires) * 2)
 
     #TODO: do something smarter here
+    # actually, no hope. Replicate() will get inherited by result of einsum...
     mat = distribute_tensor(mat, state.device_mesh, [Replicate()])
 
     # Tensor indices of the quantum state
-    state_indices = ABC[:total_wires]
+    state_indices = ABC[:nqubits]
 
     # Indices of the quantum state affected by this operation
-    affected_indices = "".join(ABC_ARRAY[list(device_wires)].tolist())
+    affected_indices = "".join(ABC_ARRAY[list(wires)].tolist())
 
     # All affected indices will be summed over, so we need the same number
     # of new indices
-    new_indices = ABC[total_wires: total_wires + len(device_wires)]
+    new_indices = ABC[nqubits: nqubits + len(wires)]
 
     # The new indices of the state are given by the old ones with the
     # affected indices replaced by the new_indices
@@ -73,13 +102,13 @@ def apply_unitary_einsum(state, mat, wires):
         state_indices,
     )
 
+    # prepend extra letter for batch dimension
     state_indices = ABC[-1] + state_indices
     new_state_indices = ABC[-1] + new_state_indices
-    if is_batch_unitary:
+    if mat_is_batched:
         new_indices = ABC[-1] + new_indices
 
     # We now put together the indices in the notation numpy einsum
-    # requires
     einsum_indices = (
         f"{new_indices}{affected_indices}," f"{state_indices}->{new_state_indices}"
     )
@@ -123,8 +152,7 @@ def gate_wrapper(
 
     assert np.log2(matrix.shape[-1]) == len(wires)
 
-    matrix_real, matrix_imag = torch.view_as_real(matrix).split(1, dim=-1)
-    matrix_real, matrix_imag = matrix_real[..., 0], matrix_imag[..., 0]
+    matrix_real, matrix_imag = (lambda x: (x[..., 0], x[..., 1]))(torch.view_as_real(matrix))
     if q_device.device_name=="noisedevice":
         raise ValueError("In `gate_wrapper`: `noisedevice` not supported yet")
         density = q_device.densities
@@ -136,9 +164,9 @@ def gate_wrapper(
     else:
         state = q_device.states
         if method == "einsum":
+            warnings.warn('using `method=einsum` will likely incur heavy communication and memory costs')
             func = apply_unitary_einsum
         elif method == "bmm":
-            raise ValueError("In `gate_wrapper`: `bmm` not supported for `method`")
             func = apply_unitary_bmm
         
         # manually turn reals into complex
@@ -152,7 +180,7 @@ def gate_wrapper(
 
 def rot(
     name,  # rx, ry, or rz
-    q_device, wires, params=None, comp_method="einsum",
+    q_device, wires, params=None, comp_method="bmm",
 ):
     mat = getattr(TQ_RS[name[-1]], f'{name}_matrix')
     gate_wrapper(
@@ -162,7 +190,7 @@ def rot(
 
 def pauli(
     name,  # (c)x, (c)y, or (c)z
-    q_device, wires, params=None, comp_method="einsum",
+    q_device, wires, params=None, comp_method="bmm",
 ):
     full_name = f'pauli{name}' if len(name) == 1 else name
     mat = getattr(TQ_PAULIS[name[-1]], f'_{name[-1]}_mat_dict')[full_name]
