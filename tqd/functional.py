@@ -42,20 +42,24 @@ def apply_unitary_bmm(state: DTensor, mat: torch.Tensor, wires: Union[int, list[
 
     gate_dims = [w + 1 for w in wires]
     # TODO: deal with sharding in gate_dims
+
     mat = distribute_tensor(mat, state.device_mesh, [Replicate()])
 
     permute_to = list(range(state.dim()))
     for d in sorted(gate_dims, reverse=True):
         del permute_to[d]
-    permute_to = permute_to + gate_dims[::-1]
+    permute_to = permute_to + gate_dims
     permute_back = list(np.argsort(permute_to))
-    permuted = state.permute(permute_to)
+    orig_shape = state.shape
+    permuted = state.permute(permute_to).flatten(-len(wires), -1)
 
     #permuted (b, ..., p, m)
     #mat (n, m)
     new_state = (mat * permuted.unsqueeze(-2)).sum(-1)
 
-    new_state = new_state.permute(permute_back)
+    # technically orig_shape is not quite right, but it's the same as the required shape
+    # since it's all 2's except for batch size
+    new_state = new_state.view(orig_shape).permute(permute_back)
 
     return new_state
 
@@ -193,6 +197,7 @@ def pauli(
     q_device, wires, params=None, comp_method="bmm",
 ):
     full_name = f'pauli{name}' if len(name) == 1 else name
+    full_name = full_name if full_name != 'cx' else 'cnot'
     mat = getattr(TQ_PAULIS[name[-1]], f'_{name[-1]}_mat_dict')[full_name]
     gate_wrapper(
         name=name, mat=mat, method=comp_method, q_device=q_device,

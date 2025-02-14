@@ -26,8 +26,8 @@ def test_dqd(verbose=False):
     qdev.y(wires=[wire])
 
     # test Module
-    x_gate = tqd.X(wires=[wire])
-    x_gate(qdev)
+    cx_gate = tqd.CX(wires=[wire, (wire+1) % nq])
+    cx_gate(qdev)
     
     # test functional
     tqd.rz(qdev, wires=[wire], params=torch.pi/3)
@@ -40,7 +40,7 @@ def test_dqd(verbose=False):
     # compare against ground truth
     qdev_tq = tq.QuantumDevice(3)
     qdev_tq.y(wires=[wire])
-    qdev_tq.x(wires=[wire])
+    qdev_tq.cx(wires=[wire, (wire+1) % nq])
     qdev_tq.rz(wires=[wire], params=torch.pi/3)
 
     # remove singleton batch dimension and put complex split dimension in front to match our implementation
