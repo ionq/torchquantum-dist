@@ -13,6 +13,7 @@ def test_dqd(verbose=False):
     rank = os.environ['LOCAL_RANK']
     nq = 3
     world_sz = 2
+    wire = 0
     qdev = DistributedQuantumDevice(
         nq,
         device=f'cuda',
@@ -22,14 +23,14 @@ def test_dqd(verbose=False):
         print(f'before {rank} {qdev.states}')
 
     # test class method
-    qdev.y(wires=[2])
+    qdev.y(wires=[wire])
 
     # test Module
-    x_gate = tqd.X(wires=[2])
+    x_gate = tqd.X(wires=[wire])
     x_gate(qdev)
     
     # test functional
-    tqd.rz(qdev, wires=[2], params=torch.pi/3)
+    tqd.rz(qdev, wires=[wire], params=torch.pi/3)
     
     if verbose:
         print(f'after {rank} {qdev.states}')
@@ -38,9 +39,9 @@ def test_dqd(verbose=False):
 
     # compare against ground truth
     qdev_tq = tq.QuantumDevice(3)
-    qdev_tq.y(wires=[2])
-    qdev_tq.x(wires=[2])
-    qdev_tq.rz(wires=[2], params=torch.pi/3)
+    qdev_tq.y(wires=[wire])
+    qdev_tq.x(wires=[wire])
+    qdev_tq.rz(wires=[wire], params=torch.pi/3)
 
     # remove singleton batch dimension and put complex split dimension in front to match our implementation
     states_tq = torch.view_as_real(qdev_tq.states).permute([0,4,1,2,3])[0]

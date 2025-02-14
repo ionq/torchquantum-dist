@@ -50,11 +50,12 @@ class DistributedQuantumDevice:
         torch.distributed.init_process_group(world_size=world_sz)
         self.device_mesh = init_device_mesh(device, (world_sz,))
 
+        # shard along last dimensions: assume that first computations use lower number wires
         self.log2_devices = int(np.ceil(np.log2(world_sz)))
-        self.local_shape = (2, ) + (1, ) * self.log2_devices + (2, ) * (self.n_wires - self.log2_devices)
+        self.local_shape = (2, ) + (2, ) * (self.n_wires - self.log2_devices) + (1, ) * self.log2_devices
         self.full_shape = (2, ) + (2, ) * self.n_wires
         _states = torch.zeros(self.local_shape)
-        self.placements = [Shard(i+1) for i in range(self.log2_devices)]
+        self.placements = [Shard(self.n_wires-i) for i in range(self.log2_devices)]
         if self.rank == '0':
             _states[(0,) * _states.ndim] = 1
         self.states = DTensor.from_local(_states, self.device_mesh, self.placements)
