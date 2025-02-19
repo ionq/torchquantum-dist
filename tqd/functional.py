@@ -1,7 +1,6 @@
 import functools
 import importlib
 import itertools
-import os
 import warnings
 from typing import Callable, Union
 
@@ -206,83 +205,6 @@ def pauli(
         name=name, mat=mat, method=comp_method, q_device=q_device,
         wires=wires, params=None,
     )
-
-def sampler_diff_approx(
-    state_mag: DTensor, shots: int
-) -> DTensor:
-    # state_mag is a single state vector with no batch dimension
-    rank = int(os.environ['RANK'])
-    world_sz = int(os.environ['WORLD_SIZE'])
-    p = state_mag
-    # cheap good gaussian: https://stats.stackexchange.com/a/454431
-    p_2 = torch.sqrt(p + 1e-8)  # eps to avoid nan in gradient at 0
-
-    z = torch.randn(p.to_local().size(), device=p.device)
-    if rank == world_sz - 1:
-        z[-1] = 0
-    z = DTensor.from_local(z, device_mesh=p.device_mesh, placements=p.placements)
-    e_d = torch.zeros(p.to_local().size(), device=p.device)
-    if rank == world_sz - 1:
-        e_d[-1] = 1
-    e_d = DTensor.from_local(e_d, device_mesh=p.device_mesh, placements=p.placements)
-
-    # all-reduce
-    u = (p_2 - e_d) / (torch.norm(p_2 - e_d) + 1e-8)
-    mu = p * shots
-    # Householder
-    Qz = z - 2 * u * (z * u).sum()  # another all-reduce
-    v = p_2 * Qz * (shots ** 0.5)  # should stay distributed
-
-    # new counts, differentiably rectified to be positive only, normalized to sum to 1
-    state_mag_noisy = torch.nn.functional.relu(v + mu)
-    state_mag_noisy = state_mag_noisy / (state_mag_noisy.sum() + 1e-8)  # another all-reduce
-    return state_mag_noisy
-
-def sampler_nondiff_exact(
-    state_mag: DTensor, shots: int
-) -> DTensor:
-    # state_mag is a single state vector with no batch dimension
-    # hierarchical: first figure out N_i for i-th GPU
-    # TODO
-    gpu_probs = 0
-    local_shots = torch.distributions.multinomial.Multinomial(shots, gpu_probs)
-    # then within each GPU, sample
-    # share a rng state
-    state_mag_local = state_mag.to_local()
-    state_mag_local_norm = state_mag_local / (state_mag_local.sum() + 1e-8)
-    m = torch.distributions.multinomial.Multinomial(local_shots, state_mag_local_norm.ravel())
-    state_mag_noisy = m.sample() / shots
-    # TODO
-    state_mag_noisy = state_mag_noisy.reshape()
-    return state_mag_noisy
-
-def measure_allZ(
-    q_device, shots: int=0, training: bool=False
-):
-    states = q_device.states
-    # from here, work on a single state vector, no batch dimension
-    state_mag = (states ** 2).sum(0)  # PauliZ hardocded here; no rotation before grabbing probabilities
-    all_dims = np.arange(state_mag.dim())
-
-    if shots > 0:
-        if training:
-            state_mag_noisy = sampler_diff_approx(state_mag, shots)
-        else:
-            state_mag_noisy = sampler_nondiff_exact(state_mag, shots)
-    else:
-        state_mag_noisy = state_mag
-
-    probs = []
-    for wire in range(q_device.n_wires):
-        reduction_dims = np.delete(all_dims, [wire])
-        prob_ = state_mag_noisy
-        if reduction_dims.size != 0:  # if >1 qubit
-            prob_ = prob_.sum(list(reduction_dims))
-        probs.append(prob_)
-    probs = torch.stack(probs, dim=-2)  # q x 2
-    y = probs @ torch.tensor([1., -1.], device=probs.device)  # hardcoded PauliZ
-
-    return y.unsqueeze(0)  # add singleton batch dimension back in
 
 # populate namespace with functionals
 for name_ in PAULI_NAMES:

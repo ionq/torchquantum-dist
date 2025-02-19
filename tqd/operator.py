@@ -24,18 +24,18 @@ class Op(torch.nn.Module):
         )
 
 # Factory that programattically creates RY from ry, CX from cx, etc
-def OpFactory(name, has_params=True, trainable=True):
+def OpFactory(name, module, has_params=True, trainable=True):
     """
     `name` is lower case
     """
     def __init__(self, wires, **kwargs):
         kwargs.update({'has_params': kwargs.get('has_params', has_params)})
         kwargs.update({'trainable': kwargs.get('trainable', trainable)})
-        Op.__init__(self, getattr(functional, name), wires, **kwargs)
+        Op.__init__(self, getattr(module, name), wires, **kwargs)
     newclass = type(name.upper(), (Op, ), {"__init__": __init__})
     return newclass
 
 for name_ in functional.ROT_NAMES:
-    vars()[name_.upper()] = OpFactory(name_)
+    vars()[name_.upper()] = OpFactory(name_, functional)
 for name_ in functional.PAULI_NAMES:
-    vars()[name_.upper()] = OpFactory(name_, has_params=False, trainable=False)
+    vars()[name_.upper()] = OpFactory(name_, functional, has_params=False, trainable=False)

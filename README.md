@@ -5,11 +5,12 @@ Extension of `torchquantum` (henceforth `tq`) to allow multi-GPU distributed sta
   - `DistributedQuantumDevice`, similar to `QuantumDevice`, but allowing statevector to be distributed across multiple GPUS
   - Gates similar to those in `tq.functional` that operate on `DistributedQuantumDevice` (e.g. `x`, `cy`, `rz`)
   - Modules defining gates and containing trainable parameters similar to those in `tq.operator` (e.g. `X`, `CY`, `RZ`)
+  - Measurement of all qubits in Pauli Z (computational) basis
+  - Ability to extend the library with your own custom gates (n.b. does NOT check for unitarity!)
 
 ## Example usage
 ```python
 import torch
-
 import tqd
 
 nq = 6  # number of qubits
@@ -24,6 +25,8 @@ ry(qdev)
 
 # operate directly using qdev's own methods
 qdev.cx(wires=[0,1])
+
+exact = tqd.measure_allZ(qdev)
 ```
 
 ## Set up
@@ -32,9 +35,11 @@ Some rough instructions for different environments. Consult Google if you get st
 ### GCP
 In a GCP VM n-standard-4 with 2x T4 GPUs, follow instructions to set up CUDA drivers: https://cloud.google.com/compute/docs/gpus/install-drivers-gpu#linux
 
-### Conda
-`conda env create -yf env.yaml`
-
+### Installation
+So far only tested with `python==3.9`. From this directory:
+```bash
+pip install .
+```
 
 ## Quick test
 
@@ -42,4 +47,12 @@ In a GCP VM n-standard-4 with 2x T4 GPUs, follow instructions to set up CUDA dri
 
 ## Development
 Currently, it is assumed that gates have either 0 or 1 parameter.
-To further extend, simply create a new function and add it to `tqd.functional` and append to the list `tqd.FUNC_NAMES`. Operators automatically get created from functionals.
+
+To add custom gates without modifying the library, use the `tqd.custom.register_gate` functionality. They will show up in the `tqd.custom` module.
+
+To further extend the library, simply create a new function and add it to `tqd.functional` and append to the list `tqd.FUNC_NAMES`. Operators automatically get created from functionals.
+
+### TODOs
+ - [ ] Handle resharding when computations cross devices
+ - [ ] Gate noise model
+ - [ ] Fancy gates

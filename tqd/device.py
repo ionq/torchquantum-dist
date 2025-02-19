@@ -63,6 +63,9 @@ class DistributedQuantumDevice:
     def __del__(self):
         torch.distributed.destroy_process_group()
 
+    def maybe_reshard(self, wires):
+        pass
+
 # Give DQD methods, so we can write e.g. `qdev.ry(wires=[0])`
 for name_ in functional.FUNC_NAMES:
     func_einsum = partialmethod(getattr(functional, name_), comp_method="bmm")

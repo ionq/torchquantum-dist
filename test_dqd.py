@@ -1,20 +1,17 @@
 import os
-import sys
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import torch
 import torchquantum as tq
+import tqd
 from torch.distributed.tensor import distribute_tensor, Replicate, Shard
 
-import tqd
-from tqd import DistributedQuantumDevice
 
 def test_dqd(verbose=False):
     rank = os.environ['LOCAL_RANK']
     nq = 3
     world_sz = 2
     wire = 0
-    qdev = DistributedQuantumDevice(
+    qdev = tqd.DistributedQuantumDevice(
         nq,
         device=f'cuda',
         world_sz=world_sz
@@ -47,6 +44,10 @@ def test_dqd(verbose=False):
     states_tq = torch.view_as_real(qdev_tq.states).permute([0,4,1,2,3])[0]
     if verbose:
         print(f'torchquantum {states_tq}')
+
+    assert(torch.allclose(states_tq, qdev.states.full_tensor().cpu()))
+    tqd.custom.register_gate('i', torch.eye(2, dtype=torch.cfloat), False)
+    tqd.custom.i(qdev, wires=[1])
 
     assert(torch.allclose(states_tq, qdev.states.full_tensor().cpu()))
 
