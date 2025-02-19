@@ -81,8 +81,9 @@ class DistributedQuantumDevice:
             best_usable_qubits = [q_ for q_ in usable_qubits if q_ < min_wire]
             for i in range(len(overlap)):
                 new_qubit_sharding.add(best_usable_qubits[-1-i])
-            # all2all
-            self.states.redistribute(self.device_mesh, placements=[Shard(i) for i in new_qubit_sharding])
+            # all2all; add 1 for the batch dimension!
+            self.states = self.states.redistribute(self.device_mesh, placements=[Shard(i+1) for i in new_qubit_sharding])
+
 
 # Give DQD methods, so we can write e.g. `qdev.ry(wires=[0])`
 for name_ in functional.FUNC_NAMES:

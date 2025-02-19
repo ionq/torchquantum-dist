@@ -10,7 +10,7 @@ def test_dqd(verbose=False):
     rank = os.environ['LOCAL_RANK']
     nq = 3
     world_sz = 2
-    wire = 0
+    wire = 1
 
     qdev = tqd.DistributedQuantumDevice(
         nq,
@@ -22,13 +22,19 @@ def test_dqd(verbose=False):
 
     # test class method
     qdev.y(wires=[wire])
+    if verbose:
+        print(f'after y {rank} {qdev.states}')
 
     # test Module
     cx_gate = tqd.CX(wires=[wire, (wire+1) % nq])
     cx_gate(qdev)
-    
+    if verbose:
+        print(f'after cx {rank} {qdev.states}')
+
     # test functional
     tqd.rz(qdev, wires=[wire], params=torch.pi/3)
+    if verbose:
+        print(f'after rz {rank} {qdev.states}')
 
     # test registration
     tqd.custom.register_gate('i', torch.eye(2, dtype=torch.cfloat), False)
