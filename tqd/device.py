@@ -55,16 +55,34 @@ class DistributedQuantumDevice:
         self.local_shape = (2, ) + (2, ) * (self.n_wires - self.log2_devices) + (1, ) * self.log2_devices
         self.full_shape = (2, ) + (2, ) * self.n_wires
         _states = torch.zeros(self.local_shape)
-        self.placements = [Shard(self.n_wires-i) for i in range(self.log2_devices)]
+        placements = [Shard(self.n_wires-i) for i in range(self.log2_devices)]
         if self.rank == '0':
             _states[(0,) * _states.ndim] = 1
-        self.states = DTensor.from_local(_states, self.device_mesh, self.placements)
+        self.states = DTensor.from_local(_states, self.device_mesh, placements)
 
     def __del__(self):
         torch.distributed.destroy_process_group()
 
     def maybe_reshard(self, wires):
-        pass
+        """
+        currently assumes 2Q gates with connectivity < n_wires/2
+        """
+        cur_sharded_qubits = {s_.dim-1 for s_ in self.states.placements}
+        overlap = set(wires) & cur_sharded_qubits
+        if overlap:  # only if wires affect sharded dimensions
+            new_qubit_sharding = cur_sharded_qubits - overlap
+            usable_qubits = sorted(set(range(self.states.ndim - 1)) - (set(wires) | cur_sharded_qubits))
+            # hardcode: 2qubit gates only
+            min_wire = min(wires)
+            max_wire = max(wires)
+            # hardcode: n_wires > 2 * connectivity
+            if max_wire - min_wire > min_wire + self.n_wires - max_wire:
+                min_wire, max_wire = max_wire, min_wire + self.n_wires
+            best_usable_qubits = [q_ for q_ in usable_qubits if q_ < min_wire]
+            for i in range(len(overlap)):
+                new_qubit_sharding.add(best_usable_qubits[-1-i])
+            # all2all
+            self.states.redistribute(self.device_mesh, placements=[Shard(i) for i in new_qubit_sharding])
 
 # Give DQD methods, so we can write e.g. `qdev.ry(wires=[0])`
 for name_ in functional.FUNC_NAMES:

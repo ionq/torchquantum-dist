@@ -11,6 +11,7 @@ def test_dqd(verbose=False):
     nq = 3
     world_sz = 2
     wire = 0
+
     qdev = tqd.DistributedQuantumDevice(
         nq,
         device=f'cuda',
@@ -28,7 +29,11 @@ def test_dqd(verbose=False):
     
     # test functional
     tqd.rz(qdev, wires=[wire], params=torch.pi/3)
-    
+
+    # test registration
+    tqd.custom.register_gate('i', torch.eye(2, dtype=torch.cfloat), False)
+    tqd.custom.i(qdev, wires=[1])
+
     if verbose:
         print(f'after {rank} {qdev.states}')
         print(f'done {qdev.states.full_tensor()}')
@@ -44,10 +49,6 @@ def test_dqd(verbose=False):
     states_tq = torch.view_as_real(qdev_tq.states).permute([0,4,1,2,3])[0]
     if verbose:
         print(f'torchquantum {states_tq}')
-
-    assert(torch.allclose(states_tq, qdev.states.full_tensor().cpu()))
-    tqd.custom.register_gate('i', torch.eye(2, dtype=torch.cfloat), False)
-    tqd.custom.i(qdev, wires=[1])
 
     assert(torch.allclose(states_tq, qdev.states.full_tensor().cpu()))
 
