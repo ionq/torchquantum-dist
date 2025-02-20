@@ -15,12 +15,11 @@ def sampler_diff_approx(
     p_2 = torch.sqrt(p + 1e-8)  # eps to avoid nan in gradient at 0
 
     z = torch.randn(p.to_local().size(), device=p.device)
-    if rank == world_sz - 1:
-        z[-1] = 0
-    z = DTensor.from_local(z, device_mesh=p.device_mesh, placements=p.placements)
     e_d = torch.zeros(p.to_local().size(), device=p.device)
     if rank == world_sz - 1:
+        z[-1] = 0
         e_d[-1] = 1
+    z = DTensor.from_local(z, device_mesh=p.device_mesh, placements=p.placements)
     e_d = DTensor.from_local(e_d, device_mesh=p.device_mesh, placements=p.placements)
 
     # all-reduce
@@ -40,21 +39,20 @@ def sampler_nondiff_exact(
 ) -> DTensor:
     # state_mag is a single state vector with no batch dimension
     # hierarchical: first figure out N_i for i-th GPU, then within each GPU, sample N_i.
-    # share a rng state
+    # assumes all workers share a rng state
+    orig_shape_local = state_mag.to_local().shape
     shard_dims = [s_.dim for s_ in state_mag.placements]
     reduce_dims = np.delete(list(range(state_mag.ndim)), shard_dims)
     gpu_probs = state_mag.sum(reduce_dims)  # shouldn't require comms
     gpu_probs = gpu_probs.full_tensor().ravel()  # all gather
 
-    # TODO
-    global_rank = 0
-
+    global_rank = int(os.environ['RANK'])
     local_shots = torch.distributions.multinomial.Multinomial(shots, gpu_probs).sample()[global_rank]
+
     state_mag_local = state_mag.to_local().ravel()
     state_mag_local_norm = state_mag_local / (state_mag_local.sum() + 1e-8)
     state_mag_noisy  = torch.distributions.multinomial.Multinomial(local_shots, state_mag_local_norm).sample() / shots
-    # TODO
-    state_mag_noisy = state_mag_noisy.reshape()
+    state_mag_noisy = DTensor.from_local(state_mag_noisy.reshape(orig_shape_local), device_mesh=state_mag.device_mesh, placements=state_mag.placements)
     return state_mag_noisy
 
 def measure_allZ(
@@ -69,6 +67,8 @@ def measure_allZ(
         if training:
             state_mag_noisy = sampler_diff_approx(state_mag, shots)
         else:
+            torch.manual_seed(q_device.shared_seed)
+            q_device.shared_seed += 1
             state_mag_noisy = sampler_nondiff_exact(state_mag, shots)
     else:
         state_mag_noisy = state_mag
@@ -80,7 +80,7 @@ def measure_allZ(
         if reduction_dims.size != 0:  # if >1 qubit
             prob_ = prob_.sum(list(reduction_dims))
         probs.append(prob_)
-    probs = torch.stack(probs, dim=-2)  # q x 2
+    probs = torch.stack(probs, dim=-2)  # (q, 2)
     y = probs @ torch.tensor([1., -1.], device=probs.device)  # hardcoded PauliZ
 
-    return y.unsqueeze(0)  # add singleton batch dimension back in
+    return y.unsqueeze(0)  # (1, q)

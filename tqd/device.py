@@ -20,6 +20,7 @@ class DistributedQuantumDevice:
         device: Union[torch.device, str] = "cuda",
         record_op: bool = False,
         world_sz: int = 1,
+        shared_seed: int = 20740,
     ):
         """A quantum device that contains the quantum state vector.
         Args:
@@ -38,6 +39,7 @@ class DistributedQuantumDevice:
         self.device_name = device_name + "_distributed"
         self.bsz = bsz
         self.device = device
+        self.shared_seed = shared_seed
 
         self.record_op = record_op
         self.op_history = []
