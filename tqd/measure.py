@@ -12,7 +12,7 @@ def sampler_diff_approx(
     world_sz = int(os.environ['WORLD_SIZE'])
     p = state_mag
     # cheap good gaussian: https://stats.stackexchange.com/a/454431
-    p_2 = torch.sqrt(p + 1e-8)  # eps to avoid nan in gradient at 0
+    p_2 = torch.sqrt(p + 1e-16)  # eps to avoid nan in gradient at 0
 
     z = torch.randn(p.to_local().size(), device=p.device)
     e_d = torch.zeros(p.to_local().size(), device=p.device)
@@ -43,16 +43,20 @@ def sampler_nondiff_exact(
     orig_shape_local = state_mag.to_local().shape
     shard_dims = [s_.dim for s_ in state_mag.placements]
     reduce_dims = np.delete(list(range(state_mag.ndim)), shard_dims)
-    gpu_probs = state_mag.sum(reduce_dims)  # shouldn't require comms
+    gpu_probs = state_mag.sum(list(reduce_dims))  # shouldn't require comms
     gpu_probs = gpu_probs.full_tensor().ravel()  # all gather
 
     global_rank = int(os.environ['RANK'])
-    local_shots = torch.distributions.multinomial.Multinomial(shots, gpu_probs).sample()[global_rank]
+    local_shots = int(torch.distributions.multinomial.Multinomial(shots, gpu_probs).sample()[global_rank].item())
 
-    state_mag_local = state_mag.to_local().ravel()
-    state_mag_local_norm = state_mag_local / (state_mag_local.sum() + 1e-8)
-    state_mag_noisy  = torch.distributions.multinomial.Multinomial(local_shots, state_mag_local_norm).sample() / shots
-    state_mag_noisy = DTensor.from_local(state_mag_noisy.reshape(orig_shape_local), device_mesh=state_mag.device_mesh, placements=state_mag.placements)
+    if local_shots > 0:
+        state_mag_local = state_mag.to_local().ravel()
+        state_mag_local_norm = state_mag_local / (state_mag_local.sum() + 1e-8)
+        state_mag_noisy  = torch.distributions.multinomial.Multinomial(local_shots, state_mag_local_norm).sample() / shots
+        state_mag_noisy = state_mag_noisy.reshape(orig_shape_local)
+    else:  # skip sampling and prevent nan
+        state_mag_noisy = torch.zeros(orig_shape_local, device=state_mag.device)
+    state_mag_noisy = DTensor.from_local(state_mag_noisy, device_mesh=state_mag.device_mesh, placements=state_mag.placements)
     return state_mag_noisy
 
 def measure_allZ(
@@ -76,11 +80,9 @@ def measure_allZ(
     probs = []
     for wire in range(q_device.n_wires):
         reduction_dims = np.delete(all_dims, [wire])
-        prob_ = state_mag_noisy
-        if reduction_dims.size != 0:  # if >1 qubit
-            prob_ = prob_.sum(list(reduction_dims))
+        prob_ = state_mag_noisy.sum(list(reduction_dims))
         probs.append(prob_)
-    probs = torch.stack(probs, dim=-2)  # (q, 2)
+    probs = torch.stack(probs, dim=-2).full_tensor()  # all gather (q, 2)
     y = probs @ torch.tensor([1., -1.], device=probs.device)  # hardcoded PauliZ
 
     return y.unsqueeze(0)  # (1, q)
