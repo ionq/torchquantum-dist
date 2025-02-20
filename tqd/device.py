@@ -46,9 +46,11 @@ class DistributedQuantumDevice:
 
         # set up distributed
         self.world_sz = world_sz
-        rank = os.environ['LOCAL_RANK']
-        self.rank = rank
-        torch.cuda.set_device(f'{device}:{rank}')
+        local_rank = int(os.environ['LOCAL_RANK'])
+        global_rank = int(os.environ['RANK'])
+        self.local_rank = local_rank
+        self.global_rank = global_rank
+        torch.cuda.set_device(f'{device}:{local_rank}')
         torch.distributed.init_process_group(world_size=world_sz)
         self.device_mesh = init_device_mesh(device, (world_sz,))
 
@@ -58,7 +60,7 @@ class DistributedQuantumDevice:
         self.full_shape = (2, ) + (2, ) * self.n_wires
         _states = torch.zeros(self.local_shape)
         placements = [Shard(self.n_wires-i) for i in range(self.log2_devices)]
-        if self.rank == '0':
+        if self.global_rank == 0:
             _states[(0,) * _states.ndim] = 1
         self.states = DTensor.from_local(_states, self.device_mesh, placements)
 

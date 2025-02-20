@@ -1,22 +1,18 @@
-import os
-
 import numpy as np
 import torch
-from torch.distributed.tensor import DTensor, Replicate, Shard, distribute_tensor
+from torch.distributed.tensor import DTensor
 
 def sampler_diff_approx(
-    state_mag: DTensor, shots: int
+    state_mag: DTensor, shots: int, global_rank: int, world_sz: int
 ) -> DTensor:
     # state_mag is a single state vector with no batch dimension
-    rank = int(os.environ['RANK'])
-    world_sz = int(os.environ['WORLD_SIZE'])
     p = state_mag
     # cheap good gaussian: https://stats.stackexchange.com/a/454431
     p_2 = torch.sqrt(p + 1e-16)  # eps to avoid nan in gradient at 0
 
     z = torch.randn(p.to_local().size(), device=p.device)
     e_d = torch.zeros(p.to_local().size(), device=p.device)
-    if rank == world_sz - 1:
+    if global_rank == world_sz - 1:
         z[-1] = 0
         e_d[-1] = 1
     z = DTensor.from_local(z, device_mesh=p.device_mesh, placements=p.placements)
@@ -35,7 +31,7 @@ def sampler_diff_approx(
     return state_mag_noisy
 
 def sampler_nondiff_exact(
-    state_mag: DTensor, shots: int
+    state_mag: DTensor, shots: int, global_rank: int
 ) -> DTensor:
     # state_mag is a single state vector with no batch dimension
     # hierarchical: first figure out N_i for i-th GPU, then within each GPU, sample N_i.
@@ -46,7 +42,6 @@ def sampler_nondiff_exact(
     gpu_probs = state_mag.sum(list(reduce_dims))  # shouldn't require comms
     gpu_probs = gpu_probs.full_tensor().ravel()  # all gather
 
-    global_rank = int(os.environ['RANK'])
     local_shots = int(torch.distributions.multinomial.Multinomial(shots, gpu_probs).sample()[global_rank].item())
 
     if local_shots > 0:
@@ -69,11 +64,11 @@ def measure_allZ(
 
     if shots > 0:
         if training:
-            state_mag_noisy = sampler_diff_approx(state_mag, shots)
+            state_mag_noisy = sampler_diff_approx(state_mag, shots, q_device.global_rank, q_device.world_sz)
         else:
             torch.manual_seed(q_device.shared_seed)
             q_device.shared_seed += 1
-            state_mag_noisy = sampler_nondiff_exact(state_mag, shots)
+            state_mag_noisy = sampler_nondiff_exact(state_mag, shots, q_device.global_rank)
     else:
         state_mag_noisy = state_mag
 
