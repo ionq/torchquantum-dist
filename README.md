@@ -42,8 +42,12 @@ pip install .
 ```
 
 ## Quick test
-
+On GCP:
 `torchrun --nproc-per-node=2 test_dqd.py`
+
+On Frontier:
+(assumes you have a conda environment in `~/.conda/envs/tqd` with this package `pip` installed)
+`sbatch --export=NONE batch_test_tqd.sl`
 
 ## Development
 Currently, it is assumed that gates have either 0 or 1 parameter.
