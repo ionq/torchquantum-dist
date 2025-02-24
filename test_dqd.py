@@ -40,7 +40,7 @@ def test_dqd(verbose=False):
         print(f'after rz {rank} {qdev.states}')
 
     # test registration
-    tqd.custom.register_gate('i', torch.eye(2, dtype=torch.cfloat), False)
+    tqd.custom.register_gate('i', torch.eye(2, dtype=torch.cfloat))
     tqd.custom.i(qdev, wires=[1])
 
     if verbose:

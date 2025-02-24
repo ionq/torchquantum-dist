@@ -1,6 +1,6 @@
 import torch
 
-from . import functional
+from . import functional, matrices
 
 # Base class for Operator
 class Op(torch.nn.Module):
@@ -35,7 +35,6 @@ def OpFactory(name, module, has_params=True, trainable=True):
     newclass = type(name.upper(), (Op, ), {"__init__": __init__})
     return newclass
 
-for name_ in functional.ROT_NAMES:
-    vars()[name_.upper()] = OpFactory(name_, functional)
-for name_ in functional.PAULI_NAMES:
-    vars()[name_.upper()] = OpFactory(name_, functional, has_params=False, trainable=False)
+for name_, mat_ in matrices.GATE_MAT_DICT.items():
+    kw = {} if callable(mat_) else {'has_params': False, 'trainable': False}
+    vars()[name_.upper()] = OpFactory(name_, functional, **kw)
