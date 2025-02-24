@@ -3,12 +3,7 @@ name = "torchquantum-dist"
 requires-python = ">= 3.9"
 dynamic = ["version"]
 dependencies = [
-    "ninja==1.11.1.1",
-    "qiskit_ibm-runtime==0.20.0",
-    "qiskit>=0.39.0,<1.0.0",
-    "qiskit-aer==0.13.3",
     "torch>=2.5",
-    "torchquantum==0.1.8",
 ]
 
 [tool.setuptools]

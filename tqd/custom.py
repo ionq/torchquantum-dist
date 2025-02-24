@@ -1,7 +1,9 @@
 from functools import partial
 
-from . import functional, operator
+from . import functional, matrices, operator
 
-def register_gate(name, mat, has_params):
-    globals()[name.lower()] = partial(functional.gate_wrapper, name, mat, "bmm")
-    globals()[name.upper()] = operator.OpFactory(name.lower(), globals(), has_params=has_params)
+def register_gate(name, mat):
+    if name.lower() not in matrices.GATE_MAT_DICT:
+        matrices.GATE_MAT_DICT.update({name.lower(): mat})
+        globals()[name.lower()] = partial(functional.gate, name)
+        globals()[name.upper()] = operator.OpFactory(name.lower(), globals())

@@ -9,7 +9,7 @@ import torch.distributed.tensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Shard
 
-from . import functional
+from . import functional, matrices
 
 
 class DistributedQuantumDevice:
@@ -90,6 +90,6 @@ class DistributedQuantumDevice:
 
 
 # Give DQD methods, so we can write e.g. `qdev.ry(wires=[0])`
-for name_ in functional.FUNC_NAMES:
-    func_einsum = partialmethod(getattr(functional, name_), comp_method="bmm")
-    setattr(DistributedQuantumDevice, name_, func_einsum)
+for name_ in matrices.GATE_MAT_DICT.keys():
+    func = partialmethod(getattr(functional, name_))
+    setattr(DistributedQuantumDevice, name_, func)
