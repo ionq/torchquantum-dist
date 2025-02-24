@@ -18,7 +18,7 @@ module load craype-accel-amd-gfx90a
 module load miniforge3/23.11.0-0
 
 # Activate your environment
-source activate ~/.conda/envs/tqd
+source activate ~/.conda/envs/set_qfit
 
 # Get address of head node
 export MASTER_ADDR=$(hostname -i)
