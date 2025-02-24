@@ -1,5 +1,5 @@
 # Torch Multi-GPU statevector support
-Extension of `torchquantum` (henceforth `tq`) to allow multi-GPU distributed statevector using `DTensor` from `torch.distributed`
+Minimized extension of `torchquantum` (henceforth `tq`) to allow multi-GPU distributed statevector using `DTensor` from `torch.distributed`. Does _not_ depend on `tq`.
 
 `tqd` provides:
   - `DistributedQuantumDevice`, similar to `QuantumDevice`, but allowing statevector to be distributed across multiple GPUS
@@ -42,7 +42,6 @@ pip install .
 ```
 
 ## Quick test
-
 `torchrun --nproc-per-node=2 test_dqd.py`
 
 ## Development
