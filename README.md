@@ -50,9 +50,9 @@ Currently, it is assumed that gates have either 0 or 1 parameter.
 
 To add custom gates without modifying the library, use the `tqd.custom.register_gate` functionality. They will show up in the `tqd.custom` module.
 
-To further extend the library, simply create a new function and add it to `tqd.functional` and append to the list `tqd.FUNC_NAMES`. Operators automatically get created from functionals.
+To further extend the gate set, simply create a new entry in `tqd.matrices.GATE_MAT_DICT`. Functionals and Operators automatically get created from this dictionary.
 
 ### TODOs
- - [ ] Handle resharding when computations cross devices
+ - [x] Handle resharding when computations cross devices
  - [ ] Gate noise model
  - [ ] Fancy gates
