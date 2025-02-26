@@ -7,7 +7,7 @@ def rx_mat(params: torch.Tensor) -> torch.Tensor:
     jsi = 1j * torch.sin(-theta / 2)
     return torch.stack(
         [torch.cat([co, jsi], dim=-1), torch.cat([jsi, co], dim=-1)], dim=-2
-    )
+    ).squeeze(0)
 
 def ry_mat(params: torch.Tensor) -> torch.Tensor:
     theta = params.type(torch.complex64)
@@ -15,7 +15,7 @@ def ry_mat(params: torch.Tensor) -> torch.Tensor:
     si = torch.sin(theta / 2)
     return torch.stack(
         [torch.cat([co, -si], dim=-1), torch.cat([si, co], dim=-1)], dim=-2
-    )
+    ).squeeze(0)
 
 def rz_mat(params: torch.Tensor) -> torch.Tensor:
     theta = params.type(torch.complex64)
@@ -23,7 +23,7 @@ def rz_mat(params: torch.Tensor) -> torch.Tensor:
     return torch.stack([
         torch.cat([exp, torch.zeros_like(exp)], dim=-1),
         torch.cat([torch.zeros_like(exp), torch.conj(exp)], dim=-1)
-    ], dim=-2)
+    ], dim=-2).squeeze(0)
 
 GATE_MAT_DICT = {
     'x': torch.tensor([[0, 1], [1, 0]], dtype=torch.complex64),

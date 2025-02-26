@@ -32,6 +32,7 @@ def apply_unitary_bmm(state: DTensor, mat: torch.Tensor, wires: Union[int, list[
     for d in sorted(gate_dims, reverse=True):
         del permute_to[d]
     permute_to = permute_to + gate_dims
+    #TODO: remove this
     permute_back = list(np.argsort(permute_to))
     orig_shape = state.shape
     permuted = state.permute(permute_to).flatten(-len(wires), -1)
@@ -42,9 +43,11 @@ def apply_unitary_bmm(state: DTensor, mat: torch.Tensor, wires: Union[int, list[
 
     # technically orig_shape is not quite right, but it's the same as the required shape
     # since it's all 2's except for batch size
+    #TODO: remove the permute_back
     new_state = new_state.view(orig_shape).permute(permute_back)
+    new_wire_order = list(range(state.ndim-1))
 
-    return new_state
+    return new_state, new_wire_order
 
 def gate(
     name, q_device, wires,
@@ -86,17 +89,18 @@ def gate(
     # handle resharding logic here so that applying unitary on the state operates in parallel
     q_device.maybe_reshard(wires)
 
-    state = q_device.states
+    state = q_device._states
     func = apply_unitary_bmm
     
     # manually turn reals into complex
-    states_real = func(state, matrix_real, wires)
-    states_imag = func(state, matrix_imag, wires)
+    states_real, _ = func(state, matrix_real, wires)
+    states_imag, wire_order = func(state, matrix_imag, wires)
     states_imag_flipped = torch.einsum('ij,jk...->ik...',
         distribute_tensor(torch.Tensor([[0, -1], [1, 0]]), state.device_mesh, [Replicate()]),
         states_imag
     )
-    q_device.states = states_real + states_imag_flipped
+    q_device._states = states_real + states_imag_flipped
+    q_device._wire_order = wire_order
 
 # populate namespace with functionals
 for name_ in GATE_MAT_DICT.keys():
