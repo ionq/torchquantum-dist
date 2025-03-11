@@ -16,6 +16,7 @@ class DistributedQuantumDevice:
     def __init__(
         self,
         n_wires: int,
+        bsz: int = 1,
         device_name: str = "default",
         device: Union[torch.device, str] = "cuda",
         record_op: bool = False,
@@ -34,7 +35,6 @@ class DistributedQuantumDevice:
         # number of qubits
         # the states are represented in a multi-dimension tensor
         # from left to right: qubit 0 to n
-        bsz = 2  # batch ix 0 is real, batch ix 1 is imag
         self.n_wires = n_wires
         self.device_name = device_name + "_distributed"
         self.bsz = bsz
@@ -54,19 +54,20 @@ class DistributedQuantumDevice:
         torch.distributed.init_process_group(world_size=world_sz)
         self.device_mesh = init_device_mesh(device, (world_sz,))
 
-        # shard along last dimensions: assume that first computations use lower number wires
         self.log2_devices = int(np.ceil(np.log2(world_sz)))
-        self.local_shape = (2, ) + (2, ) * (self.n_wires - self.log2_devices) + (1, ) * self.log2_devices
+        # use 1st dim for batching, last dim for real/imag
+        self.local_shape = (bsz, ) + (2, ) * (self.n_wires - self.log2_devices) + (1, ) * self.log2_devices + (2, )
         self._wire_order = list(range(self.n_wires))
+        # shard along last wire dimensions: assume that first computations use lower number wires
         self.sharded_wires = [self.n_wires - 1 - i for i in range(self.log2_devices)]
-        _states = torch.zeros(self.local_shape)
-        placements = [Shard(self.n_wires - i) for i in range(self.log2_devices)]
+        self._states = torch.zeros(self.local_shape)
+        placements = [Shard(i+1) for i in self.sharded_wires]
         if self.global_rank == 0:
-            _states[(0,) * _states.ndim] = 1
-        self._states = DTensor.from_local(_states, self.device_mesh, placements)
+            self._states[(0, ) * self._states.ndim] = 1
+        self._states = DTensor.from_local(self._states, self.device_mesh, placements)
     
     def canonicalize(self):
-        self._states = self._states.permute((0, ) + tuple(1 + np.argsort(self._wire_order)))
+        self._states = self._states.permute((0, ) + tuple(1 + np.argsort(self._wire_order)) + (self.n_wires+1, ))
         self._wire_order = list(range(self.n_wires))
     
     @property
