@@ -72,8 +72,7 @@ class DistributedQuantumDevice:
     
     @property
     def states(self):
-        self.canonicalize()
-        return self._states
+        return self._states.permute((0, ) + tuple(1 + np.argsort(self._wire_order)) + (self.n_wires+1, ))
 
     def __del__(self):
         torch.distributed.destroy_process_group()
@@ -97,7 +96,8 @@ class DistributedQuantumDevice:
             for i in range(len(overlap)):
                 new_qubit_sharding.add(best_usable_qubits[-1-i])
             # all2all; add 1 for the batch dimension!
-            self._states = self._states.redistribute(self.device_mesh, placements=[Shard(i+1) for i in new_qubit_sharding])
+            new_dim_sharding = [i + 1 for i, w in enumerate(self._wire_order) if w in new_qubit_sharding]
+            self._states = self._states.redistribute(self.device_mesh, placements=[Shard(d) for d in new_dim_sharding])
 
 
 # Give DQD methods, so we can write e.g. `qdev.ry(wires=[0])`

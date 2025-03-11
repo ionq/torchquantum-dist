@@ -5,46 +5,55 @@ import numpy as np
 import torch
 import torch.distributed
 import torch.distributed.tensor
-from torch.distributed.tensor import DTensor, Replicate, Shard, distribute_tensor
+from torch.distributed.tensor import DTensor
 
 from .matrices import GATE_MAT_DICT
 
-def apply_unitary_bmm(state: DTensor, mat: torch.Tensor, wires: Union[int, list[int]], wire_order=None):
+def apply_unitary_bmm(state: DTensor, mat: torch.Tensor, wires: Union[int, list[int]], wire_order: list[int]):
     """
-    Apply the unitary to the statevector using manually implemented broadcasted matrix multiply
-    in order to keep sharding semantics.
+    Apply the unitary to the statevector using local batch matrix multiply.
     Note: Assumes that none of the sharding dimensions are affected by wires.
 
     Args:
-        state (DTensor): The statevector as a real DTensor. in last dim, 0th index is real part, 1st index is imaginary part
-        mat (torch.Tensor): The unitary matrix of the operation as a complex Tensor.
+        state (DTensor): The batched statevectors as a real DTensor. in last dim, 0th index is real part, 1st index is imaginary part
+        mat (torch.Tensor): The batched unitary matrix of the operation as a complex Tensor.
         wires (int or List[int]): Which qubit(s) the operation is applied to.
 
     Returns:
-        torch.Tensor: The new statevector.
+        torch.Tensor: The new batch of statevectors.
 
     """
-
+    mat = mat.to(state.device)
     gate_dims = [w + 1 for w in wires]
 
-    permute_to = list(range(state.dim()-1))
-    for d in sorted(gate_dims, reverse=True):
-        del permute_to[d]
-    permute_to = permute_to + gate_dims + [state.dim()-1]
-    #TODO: remove this
-    permute_back = list(np.argsort(permute_to))
-    orig_shape = state.shape
-    permuted = state.permute(permute_to).flatten(-len(wires)-1, -2)
+    pre = []
+    post = []
+    for i, w in enumerate(wire_order):
+        if w + 1 in gate_dims:
+            pre.append(i+1)
+        else:
+            post.append(i+1)
+    new_dim_order = pre + post
+    new_wire_order = [d - 1 for d in new_dim_order]
+    permute_to = [0] + new_dim_order + [state.dim()-1]
+    orig_local_shape = state.to_local().shape
+    bsz = orig_local_shape[0]
+    permuted = state.permute(permute_to)
+    perm_dm, perm_place = permuted.device_mesh, permuted.placements
+    permuted = torch.view_as_complex(permuted.to_local()).reshape([bsz, 2 ** len(wires), -1])
 
-    #permuted (b, ..., m, 2)
-    #mat (n, m)
-    new_state_local_complex = torch.einsum('ij,...j->...i', mat.to(permuted.device), torch.view_as_complex(permuted.to_local()))
-    new_state = DTensor.from_local(torch.view_as_real(new_state_local_complex), device_mesh=state.device_mesh, placements=permuted.placements)
-    # technically orig_shape is not quite right, but it's the same as the required shape
-    # since it's all 2's except for batch size
-    #TODO: remove the permute_back
-    new_state = new_state.view(orig_shape).permute(permute_back)
-    new_wire_order = list(range(state.ndim-2))
+    #permuted (b, m, k)
+    #mat ([b,] n, m)
+    if len(mat.shape) > 2:
+        # both matrix and state are in batch mode
+        new_state = mat.bmm(permuted)
+    else:
+        # matrix no batch, state in batch mode
+        expand_shape = [bsz] + list(mat.shape)
+        new_state = mat.expand(expand_shape).bmm(permuted)
+    # technically orig_local_shape is not quite right, but it's the same as the required shape
+    # since it's all 2's except for batch size (1's where sharded)
+    new_state = DTensor.from_local(torch.view_as_real(new_state).view(orig_local_shape), device_mesh=perm_dm, placements=perm_place)
 
     return new_state, new_wire_order
 
@@ -88,12 +97,12 @@ def gate(
     q_device.maybe_reshard(wires)
 
     state = q_device._states
+    wire_order = q_device._wire_order
     func = apply_unitary_bmm
     
-    # manually turn reals into complex
     #print(f'{state} {matrix}')
-    states, wire_order = func(state, matrix, wires, wire_order=q_device._wire_order)
-    q_device._states = states
+    state, wire_order = func(state, matrix, wires, wire_order)
+    q_device._states = state
     q_device._wire_order = wire_order
 
 # populate namespace with functionals

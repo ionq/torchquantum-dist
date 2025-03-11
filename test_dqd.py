@@ -133,5 +133,5 @@ def test_noisy_meas(verbose=False):
         print('standalone noisy measurement test passed!')
 
 if __name__ == "__main__":
-    test_dqd(True)
+    test_dqd(False)
     test_noisy_meas(False)
