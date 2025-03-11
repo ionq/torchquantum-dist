@@ -57,17 +57,17 @@ def test_dqd(verbose=False):
     states_tq = torch.view_as_real(qdev_tq.states).permute([0,4,1,2,3])[0]
     """
     states_tq = torch.Tensor([[[[ 0.,  0.],
-          [ 0., -0.5]],
+          [ 0.,  0.]],
          [[ 0.,  0.],
-          [ 0.,  0.]]],
+          [-0.5, torch.sqrt(torch.tensor([3]))/2]]],
         [[[ 0.,  0.],
-          [ 0.,  torch.sqrt(torch.tensor([3]))/2]],
+          [ 0.,  0.]],
          [[ 0.,  0.],
           [ 0.,  0.]]]])
 
     if verbose:
         print(f'torchquantum {states_tq}')
-    assert(torch.allclose(states_tq, qdev.states.full_tensor().cpu()))
+    assert(torch.allclose(states_tq, qdev.states.full_tensor().cpu()[0]))
     if rank == '0':
         print('class method, module, functional, registration, and correctness test passed!')
 
@@ -85,14 +85,15 @@ def test_dqd(verbose=False):
 
     # test noisy non-differentiable (sampling) measurement
     meas_samp = tqd.measure_allZ(qdev, shots=1024, training=False)
+    if verbose:
+        print(f'meas_noisy non-diff {rank} {meas_samp}')
+    assert(torch.allclose(meas_tq, meas_samp.cpu()))
 
     # test noisy differentiable (approximate) measurement
     meas_approx = tqd.measure_allZ(qdev, shots=1024, training=True)
     if verbose:
-        print(f'meas_noisy {rank} {meas_samp} {meas_approx}')
-
+        print(f'meas_noisy diff {rank} {meas_approx}')
     assert(torch.allclose(meas_tq, meas_approx.cpu()))
-    assert(torch.allclose(meas_tq, meas_samp.cpu()))
 
     if rank == '0':
         print('monotest noisy measurement test passed!')

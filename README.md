@@ -53,5 +53,7 @@ To further extend the gate set, simply create a new entry in `tqd.matrices.GATE_
 
 ### TODOs
  - [x] Handle resharding when computations cross devices
+ - [ ] Less permuting
+ - [ ] Reintroduce batching
  - [ ] Gate noise model
  - [ ] Fancy gates
