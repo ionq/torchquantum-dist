@@ -57,17 +57,17 @@ def test_dqd(verbose=False):
     states_tq = torch.view_as_real(qdev_tq.states).permute([0,4,1,2,3])[0]
     """
     states_tq = torch.Tensor([[[[ 0.,  0.],
-          [ 0., -0.5]],
+          [ 0.,  0.]],
          [[ 0.,  0.],
-          [ 0.,  0.]]],
+          [-0.5, torch.sqrt(torch.tensor([3]))/2]]],
         [[[ 0.,  0.],
-          [ 0.,  torch.sqrt(torch.tensor([3]))/2]],
+          [ 0.,  0.]],
          [[ 0.,  0.],
           [ 0.,  0.]]]])
 
     if verbose:
         print(f'torchquantum {states_tq}')
-    assert(torch.allclose(states_tq, qdev.states.full_tensor().cpu()))
+    assert(torch.allclose(states_tq, qdev.states.full_tensor().cpu()[0]))
     if rank == '0':
         print('class method, module, functional, registration, and correctness test passed!')
 
@@ -85,14 +85,15 @@ def test_dqd(verbose=False):
 
     # test noisy non-differentiable (sampling) measurement
     meas_samp = tqd.measure_allZ(qdev, shots=1024, training=False)
+    if verbose:
+        print(f'meas_noisy non-diff {rank} {meas_samp}')
+    assert(torch.allclose(meas_tq, meas_samp.cpu()))
 
     # test noisy differentiable (approximate) measurement
     meas_approx = tqd.measure_allZ(qdev, shots=1024, training=True)
     if verbose:
-        print(f'meas_noisy {rank} {meas_samp} {meas_approx}')
-
+        print(f'meas_noisy diff {rank} {meas_approx}')
     assert(torch.allclose(meas_tq, meas_approx.cpu()))
-    assert(torch.allclose(meas_tq, meas_samp.cpu()))
 
     if rank == '0':
         print('monotest noisy measurement test passed!')
@@ -131,6 +132,59 @@ def test_noisy_meas(verbose=False):
     if rank == '0':
         print('standalone noisy measurement test passed!')
 
+def test_encoder(verbose=False):
+    rank = os.environ['RANK']
+    nq = 3
+    world_sz = 2
+
+    qdev = tqd.DistributedQuantumDevice(
+        nq,
+        device=f'cuda',
+        world_sz=world_sz
+    )
+
+    func_list = [
+        {'func': 'rx', 'wires': [0], 'input_idx': [0]},
+        {'func': 'ry', 'wires': [1], 'input_idx': [1]},
+        {'func': 'rz', 'wires': [2], 'input_idx': [2]},
+    ]
+    x = torch.Tensor([[1,2,3]])
+    # test encoder
+    enc = tqd.GeneralEncoder(func_list)
+    enc(qdev, x)
+    states = qdev.states
+
+    # compare against ground truth
+    """
+    import torchquantum as tq
+    qdev_tq = tq.QuantumDevice(3)
+    enc_tq = tq.GeneralEncoder(func_list)
+    enc_tq(qdev_tq, x)
+    states_tq = torch.view_as_real(qdev_tq.states)
+    """
+    states_tq = torch.Tensor(
+        [[[[[ 0.03354074, -0.47297207],
+           [ 0.00000000,  0.00000000]],
+
+          [[ 0.05223661, -0.73661041],
+           [ 0.00000000,  0.00000000]]],
+
+
+         [[[-0.25838584, -0.01832339],
+           [ 0.00000000,  0.00000000]],
+
+          [[-0.40241212, -0.02853699],
+           [ 0.00000000,  0.00000000]]]]]
+    )
+    if verbose:
+        print(f'  enc torchquantum {states_tq}\n  enc tqd {states.full_tensor()}')
+
+    assert(torch.allclose(states_tq, states.full_tensor().cpu()))
+
+    if rank == '0':
+        print('standalone encoder test passed!')
+
 if __name__ == "__main__":
     test_dqd(False)
     test_noisy_meas(False)
+    test_encoder(False)

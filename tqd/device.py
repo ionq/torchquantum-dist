@@ -16,6 +16,7 @@ class DistributedQuantumDevice:
     def __init__(
         self,
         n_wires: int,
+        bsz: int = 1,
         device_name: str = "default",
         device: Union[torch.device, str] = "cuda",
         record_op: bool = False,
@@ -34,7 +35,6 @@ class DistributedQuantumDevice:
         # number of qubits
         # the states are represented in a multi-dimension tensor
         # from left to right: qubit 0 to n
-        bsz = 2  # batch ix 0 is real, batch ix 1 is imag
         self.n_wires = n_wires
         self.device_name = device_name + "_distributed"
         self.bsz = bsz
@@ -50,19 +50,33 @@ class DistributedQuantumDevice:
         global_rank = int(os.environ['RANK'])
         self.local_rank = local_rank
         self.global_rank = global_rank
-        torch.cuda.set_device(f'{device}:{local_rank}')
+        if device =='cuda':
+            torch.cuda.set_device(f'cuda:{local_rank}')
         torch.distributed.init_process_group(world_size=world_sz)
         self.device_mesh = init_device_mesh(device, (world_sz,))
 
-        # shard along last dimensions: assume that first computations use lower number wires
         self.log2_devices = int(np.ceil(np.log2(world_sz)))
-        self.local_shape = (2, ) + (2, ) * (self.n_wires - self.log2_devices) + (1, ) * self.log2_devices
-        self.full_shape = (2, ) + (2, ) * self.n_wires
-        _states = torch.zeros(self.local_shape)
-        placements = [Shard(self.n_wires-i) for i in range(self.log2_devices)]
+        # use 1st dim for batching, last dim for real/imag
+        self.local_shape = (bsz, ) + (2, ) * (self.n_wires - self.log2_devices) + (1, ) * self.log2_devices + (2, )
+        self.reset_states()
+
+    def reset_states(self):
+        self._wire_order = list(range(self.n_wires))
+        # shard along last wire dimensions: assume that first computations use lower number wires
+        sharded_wires = [self.n_wires - 1 - i for i in range(self.log2_devices)]
+        self._states = torch.zeros(self.local_shape, device=self.device)
+        placements = [Shard(i+1) for i in sharded_wires]
         if self.global_rank == 0:
-            _states[(0,) * _states.ndim] = 1
-        self.states = DTensor.from_local(_states, self.device_mesh, placements)
+            self._states[(0, ) * self._states.ndim] = 1
+        self._states = DTensor.from_local(self._states, self.device_mesh, placements)
+    
+    def canonicalize(self):
+        self._states = self.states
+        self._wire_order = list(range(self.n_wires))
+    
+    @property
+    def states(self):
+        return self._states.permute((0, ) + tuple(1 + np.argsort(self._wire_order)) + (self.n_wires+1, ))
 
     def __del__(self):
         torch.distributed.destroy_process_group()
@@ -71,11 +85,11 @@ class DistributedQuantumDevice:
         """
         currently assumes 2Q gates with connectivity < n_wires/2
         """
-        cur_sharded_qubits = {s_.dim-1 for s_ in self.states.placements}
+        cur_sharded_qubits = {s_.dim-1 for s_ in self._states.placements}
         overlap = set(wires) & cur_sharded_qubits
         if overlap:  # only if wires affect sharded dimensions
             new_qubit_sharding = cur_sharded_qubits - overlap
-            usable_qubits = sorted(set(range(self.states.ndim - 1)) - (set(wires) | cur_sharded_qubits))
+            usable_qubits = sorted(set(range(self._states.ndim - 1)) - (set(wires) | cur_sharded_qubits))
             # hardcode: 2qubit gates only
             min_wire = min(wires)
             max_wire = max(wires)
@@ -86,7 +100,8 @@ class DistributedQuantumDevice:
             for i in range(len(overlap)):
                 new_qubit_sharding.add(best_usable_qubits[-1-i])
             # all2all; add 1 for the batch dimension!
-            self.states = self.states.redistribute(self.device_mesh, placements=[Shard(i+1) for i in new_qubit_sharding])
+            new_dim_sharding = [i + 1 for i, w in enumerate(self._wire_order) if w in new_qubit_sharding]
+            self._states = self._states.redistribute(self.device_mesh, placements=[Shard(d) for d in new_dim_sharding])
 
 
 # Give DQD methods, so we can write e.g. `qdev.ry(wires=[0])`

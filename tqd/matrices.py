@@ -1,6 +1,6 @@
 import torch
 
-# assumes no batches of params
+# batches are shape (b, 1)
 def rx_mat(params: torch.Tensor) -> torch.Tensor:
     theta = params.type(torch.complex64)
     co = torch.cos(theta / 2)
