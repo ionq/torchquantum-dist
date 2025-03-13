@@ -33,10 +33,11 @@ def apply_unitary_bmm(state: DTensor, mat: torch.Tensor, wires: Union[int, list[
             pre.append(i+1)
         else:
             post.append(i+1)
-    new_dim_order = pre + post
-    new_wire_order = [d - 1 for d in new_dim_order]
-    permute_to = [0] + new_dim_order + [state.dim()-1]
+    permute_to = pre + post
+    new_wire_order = [wire_order[d - 1] for d in permute_to]
+    permute_to = [0] + permute_to + [state.dim()-1]
     orig_local_shape = state.to_local().shape
+    permuted_local_shape = [orig_local_shape[i] for i in permute_to]
     bsz = orig_local_shape[0]
     permuted = state.permute(permute_to)
     perm_dm, perm_place = permuted.device_mesh, permuted.placements
@@ -53,7 +54,7 @@ def apply_unitary_bmm(state: DTensor, mat: torch.Tensor, wires: Union[int, list[
         new_state = mat.expand(expand_shape).bmm(permuted)
     # technically orig_local_shape is not quite right, but it's the same as the required shape
     # since it's all 2's except for batch size (1's where sharded)
-    new_state = DTensor.from_local(torch.view_as_real(new_state).view(orig_local_shape), device_mesh=perm_dm, placements=perm_place)
+    new_state = DTensor.from_local(torch.view_as_real(new_state).view(permuted_local_shape), device_mesh=perm_dm, placements=perm_place)
 
     return new_state, new_wire_order
 
@@ -99,8 +100,7 @@ def gate(
     state = q_device._states
     wire_order = q_device._wire_order
     func = apply_unitary_bmm
-    
-    #print(f'{state} {matrix}')
+
     state, wire_order = func(state, matrix, wires, wire_order)
     q_device._states = state
     q_device._wire_order = wire_order

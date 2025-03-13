@@ -50,24 +50,28 @@ class DistributedQuantumDevice:
         global_rank = int(os.environ['RANK'])
         self.local_rank = local_rank
         self.global_rank = global_rank
-        torch.cuda.set_device(f'{device}:{local_rank}')
+        if device =='cuda':
+            torch.cuda.set_device(f'cuda:{local_rank}')
         torch.distributed.init_process_group(world_size=world_sz)
         self.device_mesh = init_device_mesh(device, (world_sz,))
 
         self.log2_devices = int(np.ceil(np.log2(world_sz)))
         # use 1st dim for batching, last dim for real/imag
         self.local_shape = (bsz, ) + (2, ) * (self.n_wires - self.log2_devices) + (1, ) * self.log2_devices + (2, )
+        self.reset_states()
+
+    def reset_states(self):
         self._wire_order = list(range(self.n_wires))
         # shard along last wire dimensions: assume that first computations use lower number wires
-        self.sharded_wires = [self.n_wires - 1 - i for i in range(self.log2_devices)]
-        self._states = torch.zeros(self.local_shape)
-        placements = [Shard(i+1) for i in self.sharded_wires]
+        sharded_wires = [self.n_wires - 1 - i for i in range(self.log2_devices)]
+        self._states = torch.zeros(self.local_shape, device=self.device)
+        placements = [Shard(i+1) for i in sharded_wires]
         if self.global_rank == 0:
             self._states[(0, ) * self._states.ndim] = 1
         self._states = DTensor.from_local(self._states, self.device_mesh, placements)
     
     def canonicalize(self):
-        self._states = self._states.permute((0, ) + tuple(1 + np.argsort(self._wire_order)) + (self.n_wires+1, ))
+        self._states = self.states
         self._wire_order = list(range(self.n_wires))
     
     @property
