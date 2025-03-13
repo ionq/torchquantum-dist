@@ -6,7 +6,7 @@ class GeneralEncoder(torch.nn.Module):
     def __init__(self, func_list):
         super().__init__()
         self.func_list = func_list
-    
+
     def forward(self, q_dev, x):
         for info in self.func_list:
             if callable(matrices.GATE_MAT_DICT[info['func']]):
