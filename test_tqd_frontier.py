@@ -6,7 +6,7 @@ import tqd
 from torch.distributed.tensor import distribute_tensor, Replicate, Shard
 
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
-from test_dqd import test_dqd, test_noisy_meas
+from test_dqd import test_dqd, test_noisy_meas, test_encoder
 
 if __name__ == "__main__":
     import argparse
@@ -39,3 +39,4 @@ if __name__ == "__main__":
 
     test_dqd(False)
     test_noisy_meas(False)
+    test_encoder(False)
