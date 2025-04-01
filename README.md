@@ -55,5 +55,6 @@ To further extend the gate set, simply create a new entry in `tqd.matrices.GATE_
  - [x] Handle resharding when computations cross devices
  - [x] Less permuting
  - [x] Reintroduce batching
+ - [ ] Activation checkpointing (invertible computations)
  - [ ] Gate noise model
  - [ ] Fancy gates
