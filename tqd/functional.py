@@ -60,7 +60,7 @@ def apply_unitary_bmm(state: DTensor, mat: torch.Tensor, wires: Union[int, list[
 
 def gate(
     name, q_device, wires,
-    params=None
+    params=None, inverse=False
 ):
     mat = GATE_MAT_DICT[name]
     if params is not None:
@@ -92,6 +92,9 @@ def gate(
     else:
         matrix = mat
 
+    if inverse:
+        matrix = matrix.mH
+
     assert np.log2(matrix.shape[-1]) == len(wires)
 
     # handle resharding here so that applying unitary on the state operates in parallel
@@ -108,3 +111,5 @@ def gate(
 # populate namespace with functionals
 for name_ in GATE_MAT_DICT.keys():
     vars()[name_] = functools.partial(gate, name_)
+    vars()[f"{name_}_inv"] = functools.partial(gate, name_, inverse=True)
+

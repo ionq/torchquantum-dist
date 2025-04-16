@@ -52,7 +52,8 @@ class DistributedQuantumDevice:
         self.global_rank = global_rank
         if device =='cuda':
             torch.cuda.set_device(f'cuda:{local_rank}')
-        torch.distributed.init_process_group(world_size=world_sz)
+        if world_sz > 1:
+            torch.distributed.init_process_group(world_size=world_sz)
         self.device_mesh = init_device_mesh(device, (world_sz,))
 
         self.log2_devices = int(np.ceil(np.log2(world_sz)))

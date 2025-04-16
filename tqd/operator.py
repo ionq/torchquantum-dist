@@ -4,9 +4,10 @@ from . import functional, matrices
 
 # Base class for Operator
 class Op(torch.nn.Module):
-    def __init__(self, func, wires, has_params=True, trainable=True, **unused):
+    def __init__(self, func, func_inv, wires, has_params=True, trainable=True, **unused):
         super().__init__()
         self.func_ = func
+        self.func_inv_ = func_inv
         self.wires = wires
         self.has_params = has_params
         self.trainable = trainable
@@ -15,9 +16,16 @@ class Op(torch.nn.Module):
             self.params = torch.empty(1)
             if trainable:
                 self.params = torch.nn.Parameter(self.params)
-    
+
     def forward(self, qdev, wires=None, params=None):
         self.func_(
+            qdev,
+            wires if wires is not None else self.wires,
+            params=params if params is not None else self.params
+        )
+
+    def inverse(self, qdev, wires=None, params=None):
+        self.func_inv_(
             qdev,
             wires if wires is not None else self.wires,
             params=params if params is not None else self.params
@@ -31,7 +39,7 @@ def OpFactory(name, module, has_params=True, trainable=True):
     def __init__(self, wires, **kwargs):
         kwargs.update({'has_params': kwargs.get('has_params', has_params)})
         kwargs.update({'trainable': kwargs.get('trainable', trainable)})
-        Op.__init__(self, getattr(module, name), wires, **kwargs)
+        Op.__init__(self, getattr(module, name), getattr(module, f"{name}_inv"), wires, **kwargs)
     newclass = type(name.upper(), (Op, ), {"__init__": __init__})
     return newclass
 
