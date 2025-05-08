@@ -184,7 +184,26 @@ def test_encoder(verbose=False):
     if rank == '0':
         print('standalone encoder test passed!')
 
+def test_grads(verbose=False):
+    
+    nq = 3
+    world_sz = 2
+
+    qdev = tqd.DistributedQuantumDevice(
+        nq,
+        device=f'cuda',
+        world_sz=world_sz
+    )
+    p = torch.nn.Parameter(torch.Tensor([torch.pi/3, -torch.pi/3, torch.pi/6]))
+    [qdev.ry(wires=[i], params=p[i]) for i in range(nq)]
+    [qdev.cx(wires=[i, (i+1) % nq]) for i in range(nq)]
+
+    qdev.states.abs().sum().backward()
+    assert torch.allclose(p.grad, torch.Tensor([0.3061861991882324, -0.3061861991882324, 0.65973961353302]))
+
+
 if __name__ == "__main__":
     test_dqd(False)
     test_noisy_meas(False)
     test_encoder(False)
+    test_grads(False)

@@ -2,19 +2,14 @@ import os
 import sys
 
 import torch
-import tqd
-from torch.distributed.tensor import distribute_tensor, Replicate, Shard
 
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
-from test_dqd import test_dqd, test_noisy_meas, test_encoder
+from test_dqd import test_dqd, test_noisy_meas, test_encoder, test_grads
 
 if __name__ == "__main__":
     import argparse
-    import os
 
     from mpi4py import MPI
-    import torch
-    import torch.distributed as dist
 
     parser = argparse.ArgumentParser(description='simple distributed quantum simulation')
     parser.add_argument("--master_addr", type=str, required=True)
@@ -40,3 +35,4 @@ if __name__ == "__main__":
     test_dqd(False)
     test_noisy_meas(False)
     test_encoder(False)
+    test_grads(False)
