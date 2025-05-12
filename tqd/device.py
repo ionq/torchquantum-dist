@@ -5,7 +5,6 @@ from typing import Union
 import numpy as np
 import torch
 import torch.distributed
-import torch.distributed.tensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Shard
 
@@ -90,23 +89,23 @@ class DistributedQuantumDevice:
         overlap = set(wires) & cur_sharded_qubits
         if overlap:  # only if wires affect sharded dimensions
             new_qubit_sharding = cur_sharded_qubits - overlap
-            usable_qubits = sorted(set(range(self._states.ndim - 1)) - (set(wires) | cur_sharded_qubits))
+            usable_qubits = sorted(set(range(self._states.ndim - 2)) - (set(wires) | cur_sharded_qubits))
             # hardcode: 2qubit gates only
             min_wire = min(wires)
             max_wire = max(wires)
             # hardcode: n_wires > 2 * connectivity
             if max_wire - min_wire > min_wire + self.n_wires - max_wire:
                 if inverse:
-                    min_wire, max_wire = max_wire, min_wire + self.n_wires
-                    best_usable_qubits = [q_ for q_ in usable_qubits if q_ < min_wire]
-                else:
                     min_wire, max_wire = max_wire - self.n_wires, min_wire
-                    best_usable_qubits = [q_ for q_ in usable_qubits if q_ > max_wire]
-                for i in range(len(overlap)):
-                    if inverse:
-                        new_qubit_sharding.add(best_usable_qubits[-1-i])
-                    else:
-                        new_qubit_sharding.add(best_usable_qubits[i])
+                else:
+                    min_wire, max_wire = max_wire, min_wire + self.n_wires
+            # this happens to be the same for inverse and not!
+            best_usable_qubits = [q_ for q_ in usable_qubits if q_ > max_wire] + [q_ for q_ in usable_qubits if q_ < min_wire]
+            for i in range(len(overlap)):
+                if inverse:
+                    new_qubit_sharding.add(best_usable_qubits[i])
+                else:
+                    new_qubit_sharding.add(best_usable_qubits[-1-i])
             # all2all; add 1 for the batch dimension!
             new_dim_sharding = [i + 1 for i, w in enumerate(self._wire_order) if w in new_qubit_sharding]
             self._states = self._states.redistribute(self.device_mesh, placements=[Shard(d) for d in new_dim_sharding])

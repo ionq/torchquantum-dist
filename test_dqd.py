@@ -2,7 +2,7 @@ import os
 
 import torch
 import tqd
-from torch.distributed.tensor import distribute_tensor, Replicate, Shard
+from torch.distributed.tensor import DTensor, Partial, Replicate
 
 
 def test_dqd(verbose=False):
@@ -185,7 +185,7 @@ def test_encoder(verbose=False):
         print('standalone encoder test passed!')
 
 def test_grads(verbose=False):
-    
+    rank = os.environ['RANK']
     nq = 3
     world_sz = 2
 
@@ -196,11 +196,16 @@ def test_grads(verbose=False):
     )
     p = torch.nn.Parameter(torch.Tensor([torch.pi/3, -torch.pi/3, torch.pi/6]))
     [qdev.ry(wires=[i], params=p[i]) for i in range(nq)]
+    if verbose:
+        print(f'after ry {rank} {qdev.states}')
     [qdev.cx(wires=[i, (i+1) % nq]) for i in range(nq)]
 
     qdev.states.abs().sum().backward()
-    assert torch.allclose(p.grad, torch.Tensor([0.3061861991882324, -0.3061861991882324, 0.65973961353302]))
-
+    grad_dist = DTensor.from_local(p.grad[None], qdev.device_mesh, placements=[Partial()])
+    grad = grad_dist.redistribute(qdev.device_mesh, placements=[Replicate()])
+    assert torch.allclose(grad.to_local().cpu(), torch.Tensor([0.3061861991882324, -0.3061861991882324, 0.65973961353302]))
+    if rank == '0':
+        print('grad test passed!')
 
 if __name__ == "__main__":
     test_dqd(False)
