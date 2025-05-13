@@ -21,6 +21,7 @@ class DistributedQuantumDevice:
         record_op: bool = False,
         world_sz: int = 1,
         shared_seed: int = 20740,
+        invertible: bool = False,
     ):
         """A quantum device that contains the quantum state vector.
         Args:
@@ -42,6 +43,7 @@ class DistributedQuantumDevice:
 
         self.record_op = record_op
         self.op_history = []
+        self.invertible = invertible
 
         # set up distributed
         self.world_sz = world_sz
@@ -69,6 +71,13 @@ class DistributedQuantumDevice:
         if self.global_rank == 0:
             self._states[(0, ) * self._states.ndim] = 1
         self._states = DTensor.from_local(self._states, self.device_mesh, placements)
+        if self.invertible:
+            self._invertible_dummy = DTensor.from_local(
+                torch.tensor(0, dtype=self._states.dtype, device=self._states.device).expand_as(self._states.to_local()),
+                self.device_mesh, placements
+            )
+        else:
+            self._invertible_dummy = None
     
     def canonicalize(self):
         self._states = self.states
@@ -109,6 +118,8 @@ class DistributedQuantumDevice:
             # all2all; add 1 for the batch dimension!
             new_dim_sharding = [i + 1 for i, w in enumerate(self._wire_order) if w in new_qubit_sharding]
             self._states = self._states.redistribute(self.device_mesh, placements=[Shard(d) for d in new_dim_sharding])
+            if self._invertible_dummy is not None:
+                self._invertible_dummy = self._invertible_dummy.redistribute(self.device_mesh, placements=[Shard(d) for d in new_dim_sharding])
 
 
 # Give DQD methods, so we can write e.g. `qdev.ry(wires=[0])`

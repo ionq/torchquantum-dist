@@ -3,13 +3,58 @@ from typing import Union
 
 import numpy as np
 import torch
-import torch.distributed
-import torch.distributed.tensor
+from torch.autograd import Function, backward
 from torch.distributed.tensor import DTensor
 
 from .matrices import GATE_MAT_DICT
 
-def apply_unitary_bmm(state: DTensor, mat: torch.Tensor, wires: Union[int, list[int]], wire_order: list[int]):
+
+class InvertibleUnitaryBMM(Function):
+    """
+    Implements an unitary batched matrix multiply as an invertible computation to save activation memory
+    """
+    @staticmethod
+    def forward(ctx, matrix, state, dummy):
+        # `dummy` allows passing activations thru backwards pass (in place of actual gradients)
+        ctx.save_for_backward(matrix)
+        return matrix.bmm(state), dummy
+
+    @staticmethod
+    def backward(ctx, gO, output):
+        # Recompute input from output
+        matrix, = ctx.saved_tensors
+        inp = matrix.mH.bmm(output)
+        del output
+
+        inp = inp.detach().requires_grad_()
+        mtx = matrix.detach().requires_grad_()
+        with torch.enable_grad():
+            out = mtx.bmm(inp)
+        backward(out, gO)
+        return mtx.grad, inp.grad, inp
+
+class InvertiblePostUnitaryStep(Function):
+    """
+    No-op in forwards, but starts to pass the output back for the invertible computation
+    """
+    @staticmethod
+    def forward(ctx, inp, dummy):
+        # `dummy` allows passing activations thru backwards pass (in place of actual gradients)
+        out = inp  # no-op, but easier to follow logic
+        ctx.save_for_backward(out)
+        return out
+
+    @staticmethod
+    def backward(ctx, gO):
+        # Hijacking `dummy.grad` for activations here
+        out, = ctx.saved_tensors
+        return gO, out
+
+def apply_unitary_bmm(
+    state: DTensor, mat: torch.Tensor,
+    wires: Union[int, list[int]], wire_order: list[int],
+    invertible_dummy: torch.Tensor=None
+):
     """
     Apply the unitary to the statevector using local batch matrix multiply.
     Note: Assumes that none of the sharding dimensions are affected by wires.
@@ -18,6 +63,7 @@ def apply_unitary_bmm(state: DTensor, mat: torch.Tensor, wires: Union[int, list[
         state (DTensor): The batched statevectors as a real DTensor. in last dim, 0th index is real part, 1st index is imaginary part
         mat (torch.Tensor): The batched unitary matrix of the operation as a complex Tensor.
         wires (int or List[int]): Which qubit(s) the operation is applied to.
+        invertible_dummy (torch.Tensor): use invertible computation to save memory? if yes, needs to be a dummy tensor to store gradients. if no, use None
 
     Returns:
         torch.Tensor: The new batch of statevectors.
@@ -42,21 +88,28 @@ def apply_unitary_bmm(state: DTensor, mat: torch.Tensor, wires: Union[int, list[
     permuted = state.permute(permute_to)
     perm_dm, perm_place = permuted.device_mesh, permuted.placements
     permuted = torch.view_as_complex(permuted.to_local()).reshape([bsz, 2 ** len(wires), -1])
-
+    if invertible_dummy is not None:
+        invertible_dummy = invertible_dummy.permute(permute_to)
+        invertible_dummy = torch.view_as_complex(invertible_dummy.to_local().contiguous()).reshape([bsz, 2 ** len(wires), -1])
     #permuted (b, m, k)
     #mat ([b,] n, m)
-    if len(mat.shape) > 2:
-        # both matrix and state are in batch mode
-        new_state = mat.bmm(permuted)
-    else:
+    if len(mat.shape) == 2:
         # matrix no batch, state in batch mode
         expand_shape = [bsz] + list(mat.shape)
-        new_state = mat.expand(expand_shape).bmm(permuted)
+        mat = mat.expand(expand_shape)
+    # both matrix and state are in batch mode
+    if invertible_dummy is not None:
+        new_state, invertible_dummy = InvertibleUnitaryBMM.apply(mat, permuted, invertible_dummy)
+    else:
+        new_state = mat.bmm(permuted)
+        invertible_dummy = None
     # technically orig_local_shape is not quite right, but it's the same as the required shape
     # since it's all 2's except for batch size (1's where sharded)
     new_state = DTensor.from_local(torch.view_as_real(new_state).view(permuted_local_shape), device_mesh=perm_dm, placements=perm_place)
+    if invertible_dummy is not None:
+        invertible_dummy = DTensor.from_local(torch.view_as_real(invertible_dummy).view(permuted_local_shape), device_mesh=perm_dm, placements=perm_place)
 
-    return new_state, new_wire_order
+    return new_state, new_wire_order, invertible_dummy
 
 def gate(
     name, q_device, wires,
@@ -104,9 +157,10 @@ def gate(
     wire_order = q_device._wire_order
     func = apply_unitary_bmm
 
-    state, wire_order = func(state, matrix, wires, wire_order)
+    state, wire_order, invertible_dummy = func(state, matrix, wires, wire_order, invertible_dummy=q_device._invertible_dummy)
     q_device._states = state
     q_device._wire_order = wire_order
+    q_device._invertible_dummy = invertible_dummy
 
 # populate namespace with functionals
 for name_ in GATE_MAT_DICT.keys():
