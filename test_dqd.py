@@ -202,8 +202,8 @@ def test_grads(verbose=False):
 
     qdev.states.abs().sum().backward()
     grad_dist = DTensor.from_local(p.grad[None], qdev.device_mesh, placements=[Partial()])
-    grad = grad_dist.redistribute(qdev.device_mesh, placements=[Replicate()])
-    assert torch.allclose(grad.to_local().cpu(), torch.Tensor([0.3061861991882324, -0.3061861991882324, 0.65973961353302]))
+    grad = grad_dist.full_tensor()
+    assert torch.allclose(grad.cpu(), torch.Tensor([0.3061861991882324, -0.3061861991882324, 0.65973961353302]))
     if rank == '0':
         print('grad test passed!')
 

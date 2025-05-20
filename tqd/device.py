@@ -81,11 +81,17 @@ class DistributedQuantumDevice:
     
     def canonicalize(self):
         self._states = self.states
+        self._invertible_dummy = self.invertible_dummy
         self._wire_order = list(range(self.n_wires))
     
     @property
     def states(self):
         return self._states.permute((0, ) + tuple(1 + np.argsort(self._wire_order)) + (self.n_wires+1, ))
+
+    @property
+    def invertible_dummy(self):
+        if self._invertible_dummy is not None:
+            return self._invertible_dummy.permute((0, ) + tuple(1 + np.argsort(self._wire_order)) + (self.n_wires+1, ))
 
     def __del__(self):
         torch.distributed.destroy_process_group()

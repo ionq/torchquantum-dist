@@ -37,9 +37,9 @@ def test_inv(verbose=False):
         mod = tqd.module.InvertibleUnitary(base_mod)
         mod.train()
         mod(qdev, inp)
-        #meas_approx = tqd.measure_allZ(qdev, shots=int(1e5), training=True)
-        return qdev._states
-        #return meas_approx
+        #return qdev._states
+        meas_approx = tqd.measure_allZ(qdev, shots=0, training=True)
+        return meas_approx
 
     if verbose:
         print(f'after {rank} {qdev.states}')
@@ -49,11 +49,26 @@ def test_inv(verbose=False):
     x = torch.nn.Parameter(torch.tensor([[torch.pi/3, -torch.pi/3, torch.pi/6]]))
 
     out = fun(qdev, x)
+    print(f'states: {torch.view_as_complex(qdev.states.full_tensor())}')
+    print(f'out: {out}')
     out.abs().sum().backward()
     x_grad_dist = DTensor.from_local(x.grad, qdev.device_mesh, placements=[Partial()])
-    x_grad = x_grad_dist.redistribute(qdev.device_mesh, placements=[Replicate()])
-    assert torch.allclose(x_grad.to_local().cpu(), torch.tensor([[ 0.30618620, -0.30618620,  0.65973961]]))
+    x_grad = x_grad_dist.full_tensor()
 
+    # this is for when out is qdev.state (not as good a test, since it doesn't check ordering):
+    #assert torch.allclose(x_grad.cpu(), torch.tensor([[ 0.30618620, -0.30618620,  0.65973961]]))
+    # this is for when out is noiseless measurement:
+    print(x_grad)
+    assert torch.allclose(
+        torch.view_as_complex(qdev.states.full_tensor().cpu()), 
+        torch.tensor([[[[ 0.7244+0.j, -0.0647+0.j],
+            [-0.1121+0.j,  0.4183+0.j]],
+
+            [[-0.2415+0.j,  0.1941+0.j],
+            [ 0.1121+0.j, -0.4183+0.j]]]]
+        )
+    )
+    assert torch.allclose(x_grad.cpu(), torch.tensor([[-0.80801272,  1.55801260, -0.37500000]]))
     if rank == '0':
         print('inverse test passed!')
 

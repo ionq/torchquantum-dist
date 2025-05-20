@@ -102,9 +102,6 @@ def apply_unitary_bmm(
         new_state, invertible_dummy = InvertibleUnitaryBMM.apply(mat, permuted, invertible_dummy)
     else:
         new_state = mat.bmm(permuted)
-        invertible_dummy = None
-    # technically orig_local_shape is not quite right, but it's the same as the required shape
-    # since it's all 2's except for batch size (1's where sharded)
     new_state = DTensor.from_local(torch.view_as_real(new_state).view(permuted_local_shape), device_mesh=perm_dm, placements=perm_place)
     if invertible_dummy is not None:
         invertible_dummy = DTensor.from_local(torch.view_as_real(invertible_dummy).view(permuted_local_shape), device_mesh=perm_dm, placements=perm_place)
