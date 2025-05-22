@@ -54,7 +54,8 @@ class DistributedQuantumDevice:
         if device =='cuda':
             torch.cuda.set_device(f'cuda:{local_rank}')
         if world_sz > 1:
-            torch.distributed.init_process_group(world_size=world_sz)
+            if not torch.distributed.is_initialized():
+                torch.distributed.init_process_group(world_size=world_sz)
         self.device_mesh = init_device_mesh(device, (world_sz,))
 
         self.log2_devices = int(np.ceil(np.log2(world_sz)))
@@ -94,7 +95,8 @@ class DistributedQuantumDevice:
             return self._invertible_dummy.permute((0, ) + tuple(1 + np.argsort(self._wire_order)) + (self.n_wires+1, ))
 
     def __del__(self):
-        torch.distributed.destroy_process_group()
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
 
     def maybe_reshard(self, wires, inverse=False):
         """

@@ -68,7 +68,6 @@ def sampler_nondiff_exact(
 def measure_allZ(
     q_device, shots: int=0, training: bool=False
 ):
-    q_device.canonicalize()
     states = q_device.states
     state_mag = (states ** 2).sum(-1)  # PauliZ hardocded here; no rotation before grabbing probabilities
     all_dims = np.arange(1, state_mag.dim())

@@ -74,10 +74,12 @@ def apply_unitary_bmm(
 
     pre = []
     post = []
+    for gd_ in gate_dims:
+        # order matters, so we search thru `gate_dims` in order
+        pre.append(1 + wire_order.index(gd_ - 1))
     for i, w in enumerate(wire_order):
-        if w + 1 in gate_dims:
-            pre.append(i+1)
-        else:
+        if w + 1 not in gate_dims:
+            #order doesn't matter
             post.append(i+1)
     permute_to = pre + post
     new_wire_order = [wire_order[d - 1] for d in permute_to]
