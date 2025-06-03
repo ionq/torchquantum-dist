@@ -16,6 +16,4 @@ class InvertibleUnitary(torch.nn.Module):
                 self.gates[i](qdev, inp)
             else:  # it's an `Op`
                 self.gates[i](qdev)
-            if inp.device.index == 0:
-                print(f'  after {type(self.gates[i]).__name__}, qdev._states: {qdev._states}\n    qdev._wire_order: {qdev._wire_order}\n   qdev.states: {qdev.states}')
         qdev._states = InvertiblePostUnitaryStep.apply(qdev._states, qdev._invertible_dummy)

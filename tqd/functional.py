@@ -121,9 +121,9 @@ def gate(
             params = torch.tensor(params, dtype=torch.float32)
 
         if params.dim() == 1:
-            params = params.unsqueeze(-1)
+            params = params.unsqueeze(-1).expand((q_device.bsz, -1))
         elif params.dim() == 0:
-            params = params.unsqueeze(-1).unsqueeze(-1)
+            params = params.unsqueeze(-1).unsqueeze(-1).expand((q_device.bsz, -1, -1))
     wires = [wires] if isinstance(wires, int) else wires
 
     if q_device.record_op:
