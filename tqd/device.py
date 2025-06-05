@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.distributed
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import DTensor, Shard
+from torch.distributed.tensor import DTensor, Replicate, Shard
 
 from . import functional, matrices
 
@@ -53,10 +53,11 @@ class DistributedQuantumDevice:
         self.global_rank = global_rank
         if device =='cuda':
             torch.cuda.set_device(f'cuda:{local_rank}')
+        self.device_mesh = None
         if world_sz > 1:
             if not torch.distributed.is_initialized():
                 torch.distributed.init_process_group(world_size=world_sz)
-        self.device_mesh = init_device_mesh(device, (world_sz,))
+            self.device_mesh = init_device_mesh(device, (world_sz,))
 
         self.log2_devices = int(np.ceil(np.log2(world_sz)))
         # use 1st dim for batching, last dim for real/imag
@@ -68,15 +69,21 @@ class DistributedQuantumDevice:
         # shard along last wire dimensions: assume that first computations use lower number wires
         sharded_wires = [self.n_wires - 1 - i for i in range(self.log2_devices)]
         self._states = torch.zeros(self.local_shape, device=self.device)
-        placements = [Shard(i+1) for i in sharded_wires]
         if self.global_rank == 0:
             self._states[(0, ) * self._states.ndim] = 1
-        self._states = DTensor.from_local(self._states, self.device_mesh, placements)
+        if self.world_sz > 1:
+            placements = [Shard(i+1) for i in sharded_wires]
+            self._states = DTensor.from_local(self._states, self.device_mesh, placements)
+
         if self.invertible:
-            self._invertible_dummy = DTensor.from_local(
-                torch.tensor(0, dtype=self._states.dtype, device=self._states.device).expand_as(self._states.to_local()),
-                self.device_mesh, placements
-            )
+            self._invertible_dummy = torch.tensor(0, dtype=self._states.dtype, device=self._states.device)
+            if self.world_sz > 1:
+                self._invertible_dummy = DTensor.from_local(
+                    self._invertible_dummy.expand_as(self._states.to_local()),
+                    self.device_mesh, placements
+                )
+            else:
+                self._invertible_dummy = self._invertible_dummy.expand_as(self._states)
         else:
             self._invertible_dummy = None
     
@@ -94,14 +101,12 @@ class DistributedQuantumDevice:
         if self._invertible_dummy is not None:
             return self._invertible_dummy.permute((0, ) + tuple(1 + np.argsort(self._wire_order)) + (self.n_wires+1, ))
 
-    def __del__(self):
-        if torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()
-
     def maybe_reshard(self, wires, inverse=False):
         """
         currently assumes 2Q gates with connectivity < n_wires/2
         """
+        if self.world_sz <= 1:
+            return
         cur_sharded_qubits = {s_.dim-1 for s_ in self._states.placements}
         overlap = set(wires) & cur_sharded_qubits
         if overlap:  # only if wires affect sharded dimensions
