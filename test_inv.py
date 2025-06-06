@@ -61,7 +61,7 @@ def test_inv(verbose=False):
         print(f'done {qdev.states.full_tensor()}')
 
     # test backprop:
-    x_i = torch.nn.Parameter(torch.tensor([[torch.pi/3, -torch.pi/3, torch.pi/6]], device=f'cuda:{rank}'))
+    x_i = torch.nn.Parameter(torch.tensor([[torch.pi/3, -torch.pi/3, torch.pi/6]]))
 
     out_i = fun(qdev_i, x_i)
     print(f'states invertible: {torch.view_as_complex(qdev_i.states.full_tensor())}')
@@ -75,7 +75,7 @@ def test_inv(verbose=False):
     # this is for when out is noiseless measurement:
     print(x_i_grad)
 
-    x = torch.nn.Parameter(torch.tensor([[torch.pi/3, -torch.pi/3, torch.pi/6]], device=f'cuda:{rank}'))
+    x = torch.nn.Parameter(torch.tensor([[torch.pi/3, -torch.pi/3, torch.pi/6]]))
     out = fun(qdev, x)
     print(f'states: {torch.view_as_complex(qdev.states.full_tensor())}')
     print(f'out: {out}')

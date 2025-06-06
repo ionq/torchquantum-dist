@@ -70,7 +70,7 @@ class DistributedQuantumDevice:
         sharded_wires = [self.n_wires - 1 - i for i in range(self.log2_devices)]
         self._states = torch.zeros(self.local_shape, device=self.device)
         if self.global_rank == 0:
-            self._states[(0, ) * self._states.ndim] = 1
+            self._states[(slice(None), ) + (0, ) * (self._states.ndim - 1)] = 1
         if self.world_sz > 1:
             placements = [Shard(i+1) for i in sharded_wires]
             self._states = DTensor.from_local(self._states, self.device_mesh, placements)
@@ -103,7 +103,30 @@ class DistributedQuantumDevice:
 
     def maybe_reshard(self, wires, inverse=False):
         """
-        currently assumes 2Q gates with connectivity < n_wires/2
+        If the current sharding splits the statevector in the dimension that is acted upon by the
+        gate, picks a new dimension to shard over and redistributes the statevector accordingly.
+        The new sharding dimension is picked assuming a ladder ansatz where 2Q gates are applied
+        between wires (i, i+c) looping through i increasing and where c is connectivity, and any
+        1Q gates are applied to the i+c wire (example below).
+        Incurs an all2all.
+
+        If the sharded dimension is not acted upon by the gate, does nothing.
+
+        For example, in a circuit with 6 qubits, suppose qubit wire 4 is sharded. We assume
+        c < 6/2 = 3, so max(c) == 2. We will need to reshard when the 2Q gate operates on
+        wires (2, 4). Knowing that the next 2Q gates will operate on either (3, 5) or (4, 5)
+        and any intermediate 1Q gates would operate on wire 5, we would prefer to reshard wire 2
+        to avoid resharding for as long as possible.
+
+        As future work, we could make this a little stronger by examining the current connectivity.
+
+        Arguments:
+            `wires`: (`list` of `int`) indices of qubits that will be acted upon by the gate
+            `inverse`: when going in reverse direction for invertible backpropagation, we need to
+                invert the dimension picking logic since the reversed ladder decreases in indices.
+
+        Returns:
+            None
         """
         if self.world_sz <= 1:
             return
