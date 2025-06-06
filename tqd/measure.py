@@ -38,7 +38,7 @@ def sampler_nondiff_exact(
     # hierarchical: first figure out N_i for i-th GPU, then within each GPU, sample N_i.
     # assumes all workers share a rng state
     orig_shape_local = state_mag.to_local().shape
-    shard_dims = [s_.dim for s_ in state_mag.placements]
+    shard_dims = [s_.dim for s_ in state_mag.placements if hasattr(s_, "dim")]
     reduce_dims = np.delete(list(range(state_mag.ndim)), [0] + shard_dims)
     gpu_probs = state_mag.sum(list(reduce_dims))  # shouldn't require comms
     gpu_probs = gpu_probs.full_tensor().view((orig_shape_local[0], -1))  # all gather  # (b, n_gpus)
@@ -69,7 +69,6 @@ def measure_allZ(
     q_device, shots: int=0, training: bool=False
 ):
     states = q_device.states
-    # from here, work on a single state vector, no batch dimension
     state_mag = (states ** 2).sum(-1)  # PauliZ hardocded here; no rotation before grabbing probabilities
     all_dims = np.arange(1, state_mag.dim())
 
@@ -89,7 +88,9 @@ def measure_allZ(
         reduction_dims = np.delete(all_dims, [wire])
         prob_ = state_mag_noisy.sum(list(reduction_dims))
         probs.append(prob_)
-    probs = torch.stack(probs, dim=-2).full_tensor()  # all gather (q, 2)
+    probs = torch.stack(probs, dim=-2)
+    if q_device.world_sz > 1:
+        probs = probs.full_tensor()  # all gather (b, q, 2)
     y = probs @ torch.tensor([1., -1.], device=probs.device)  # hardcoded PauliZ
 
     return y  # (b, q)

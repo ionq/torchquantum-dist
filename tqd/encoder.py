@@ -14,3 +14,12 @@ class GeneralEncoder(torch.nn.Module):
             else:
                 params = None
             getattr(functional, info['func'])(q_dev, info['wires'], params=params)
+    
+    def inverse(self, q_dev, x):
+        for info in reversed(self.func_list):
+            name = info['func'].lower()
+            if callable(matrices.GATE_MAT_DICT[name]):
+                params = x[:, info['input_idx']]
+            else:
+                params = None
+            getattr(functional, f"{name}_inv")(q_dev, info['wires'], params=params)

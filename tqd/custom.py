@@ -1,9 +1,12 @@
 from functools import partial
+from types import SimpleNamespace
 
 from . import functional, matrices, operator
 
 def register_gate(name, mat):
-    if name.lower() not in matrices.GATE_MAT_DICT:
-        matrices.GATE_MAT_DICT.update({name.lower(): mat})
-        globals()[name.lower()] = partial(functional.gate, name)
-        globals()[name.upper()] = operator.OpFactory(name.lower(), globals())
+    name = name.lower()
+    if name not in matrices.GATE_MAT_DICT:
+        matrices.GATE_MAT_DICT.update({name: mat})
+        globals()[name] = partial(functional.gate, name)
+        globals()[f"{name}_inv"] = partial(functional.gate, name, inverse=True)
+        globals()[name.upper()] = operator.OpFactory(name, SimpleNamespace(**globals()))

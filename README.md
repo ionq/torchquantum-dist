@@ -7,6 +7,7 @@ Minimized extension of `torchquantum` (henceforth `tq`) to allow multi-GPU distr
   - Modules defining gates and containing trainable parameters similar to those in `tq.operator` (e.g. `X`, `CY`, `RZ`)
   - Measurement of all qubits in Pauli Z (computational) basis
   - Ability to extend the library with your own custom gates (n.b. does NOT check for unitarity!)
+  - (2025-05-22) Invertible backpropagation requires `nightly` install of pytorch: `pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu128`
 
 ## Example usage
 ```python
@@ -42,7 +43,12 @@ pip install .
 ```
 
 ## Quick test
+On GCP:
 `torchrun --nproc-per-node=2 test_dqd.py`
+
+On Frontier:
+(assumes you have a conda environment in `~/.conda/envs/tqd` with this package `pip` installed)
+`sbatch --export=NONE batch_test_tqd.sl`
 
 ## Development
 Currently, it is assumed that gates have either 0 or 1 parameter.

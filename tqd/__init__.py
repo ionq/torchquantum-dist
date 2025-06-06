@@ -1,5 +1,5 @@
 
-from . import custom, functional, operator
+from . import custom, functional, module, operator
 from .device import DistributedQuantumDevice
 from .encoder import GeneralEncoder
 from .measure import measure_allZ

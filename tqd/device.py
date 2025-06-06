@@ -5,9 +5,8 @@ from typing import Union
 import numpy as np
 import torch
 import torch.distributed
-import torch.distributed.tensor
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import DTensor, Shard
+from torch.distributed.tensor import DTensor, Replicate, Shard
 
 from . import functional, matrices
 
@@ -22,6 +21,7 @@ class DistributedQuantumDevice:
         record_op: bool = False,
         world_sz: int = 1,
         shared_seed: int = 20740,
+        invertible: bool = False,
     ):
         """A quantum device that contains the quantum state vector.
         Args:
@@ -43,6 +43,7 @@ class DistributedQuantumDevice:
 
         self.record_op = record_op
         self.op_history = []
+        self.invertible = invertible
 
         # set up distributed
         self.world_sz = world_sz
@@ -52,8 +53,11 @@ class DistributedQuantumDevice:
         self.global_rank = global_rank
         if device =='cuda':
             torch.cuda.set_device(f'cuda:{local_rank}')
-        torch.distributed.init_process_group(world_size=world_sz)
-        self.device_mesh = init_device_mesh(device, (world_sz,))
+        self.device_mesh = None
+        if world_sz > 1:
+            if not torch.distributed.is_initialized():
+                torch.distributed.init_process_group(world_size=world_sz)
+            self.device_mesh = init_device_mesh(device, (world_sz,))
 
         self.log2_devices = int(np.ceil(np.log2(world_sz)))
         # use 1st dim for batching, last dim for real/imag
@@ -65,43 +69,93 @@ class DistributedQuantumDevice:
         # shard along last wire dimensions: assume that first computations use lower number wires
         sharded_wires = [self.n_wires - 1 - i for i in range(self.log2_devices)]
         self._states = torch.zeros(self.local_shape, device=self.device)
-        placements = [Shard(i+1) for i in sharded_wires]
         if self.global_rank == 0:
-            self._states[(0, ) * self._states.ndim] = 1
-        self._states = DTensor.from_local(self._states, self.device_mesh, placements)
+            self._states[(slice(None), ) + (0, ) * (self._states.ndim - 1)] = 1
+        if self.world_sz > 1:
+            placements = [Shard(i+1) for i in sharded_wires]
+            self._states = DTensor.from_local(self._states, self.device_mesh, placements)
+
+        if self.invertible:
+            self._invertible_dummy = torch.tensor(0, dtype=self._states.dtype, device=self._states.device)
+            if self.world_sz > 1:
+                self._invertible_dummy = DTensor.from_local(
+                    self._invertible_dummy.expand_as(self._states.to_local()),
+                    self.device_mesh, placements
+                )
+            else:
+                self._invertible_dummy = self._invertible_dummy.expand_as(self._states)
+        else:
+            self._invertible_dummy = None
     
     def canonicalize(self):
         self._states = self.states
+        self._invertible_dummy = self.invertible_dummy
         self._wire_order = list(range(self.n_wires))
     
     @property
     def states(self):
         return self._states.permute((0, ) + tuple(1 + np.argsort(self._wire_order)) + (self.n_wires+1, ))
 
-    def __del__(self):
-        torch.distributed.destroy_process_group()
+    @property
+    def invertible_dummy(self):
+        if self._invertible_dummy is not None:
+            return self._invertible_dummy.permute((0, ) + tuple(1 + np.argsort(self._wire_order)) + (self.n_wires+1, ))
 
-    def maybe_reshard(self, wires):
+    def maybe_reshard(self, wires, inverse=False):
         """
-        currently assumes 2Q gates with connectivity < n_wires/2
+        If the current sharding splits the statevector in the dimension that is acted upon by the
+        gate, picks a new dimension to shard over and redistributes the statevector accordingly.
+        The new sharding dimension is picked assuming a ladder ansatz where 2Q gates are applied
+        between wires (i, i+c) looping through i increasing and where c is connectivity, and any
+        1Q gates are applied to the i+c wire (example below).
+        Incurs an all2all.
+
+        If the sharded dimension is not acted upon by the gate, does nothing.
+
+        For example, in a circuit with 6 qubits, suppose qubit wire 4 is sharded. We assume
+        c < 6/2 = 3, so max(c) == 2. We will need to reshard when the 2Q gate operates on
+        wires (2, 4). Knowing that the next 2Q gates will operate on either (3, 5) or (4, 5)
+        and any intermediate 1Q gates would operate on wire 5, we would prefer to reshard wire 2
+        to avoid resharding for as long as possible.
+
+        As future work, we could make this a little stronger by examining the current connectivity.
+
+        Arguments:
+            `wires`: (`list` of `int`) indices of qubits that will be acted upon by the gate
+            `inverse`: when going in reverse direction for invertible backpropagation, we need to
+                invert the dimension picking logic since the reversed ladder decreases in indices.
+
+        Returns:
+            None
         """
+        if self.world_sz <= 1:
+            return
         cur_sharded_qubits = {s_.dim-1 for s_ in self._states.placements}
         overlap = set(wires) & cur_sharded_qubits
         if overlap:  # only if wires affect sharded dimensions
             new_qubit_sharding = cur_sharded_qubits - overlap
-            usable_qubits = sorted(set(range(self._states.ndim - 1)) - (set(wires) | cur_sharded_qubits))
+            usable_qubits = sorted(set(range(self._states.ndim - 2)) - (set(wires) | cur_sharded_qubits))
             # hardcode: 2qubit gates only
             min_wire = min(wires)
             max_wire = max(wires)
             # hardcode: n_wires > 2 * connectivity
             if max_wire - min_wire > min_wire + self.n_wires - max_wire:
-                min_wire, max_wire = max_wire, min_wire + self.n_wires
-            best_usable_qubits = [q_ for q_ in usable_qubits if q_ < min_wire]
+                if inverse:
+                    min_wire, max_wire = max_wire - self.n_wires, min_wire
+                else:
+                    min_wire, max_wire = max_wire, min_wire + self.n_wires
+            # this happens to be the same for inverse and not!
+            best_usable_qubits = [q_ for q_ in usable_qubits if q_ > max_wire] + [q_ for q_ in usable_qubits if q_ < min_wire]
             for i in range(len(overlap)):
-                new_qubit_sharding.add(best_usable_qubits[-1-i])
+                if inverse:
+                    new_qubit_sharding.add(best_usable_qubits[i])
+                else:
+                    new_qubit_sharding.add(best_usable_qubits[-1-i])
             # all2all; add 1 for the batch dimension!
             new_dim_sharding = [i + 1 for i, w in enumerate(self._wire_order) if w in new_qubit_sharding]
             self._states = self._states.redistribute(self.device_mesh, placements=[Shard(d) for d in new_dim_sharding])
+            if self._invertible_dummy is not None:
+                self._invertible_dummy = self._invertible_dummy.redistribute(self.device_mesh, placements=[Shard(d) for d in new_dim_sharding])
 
 
 # Give DQD methods, so we can write e.g. `qdev.ry(wires=[0])`
