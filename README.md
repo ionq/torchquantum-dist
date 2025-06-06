@@ -7,7 +7,9 @@ Minimized extension of `torchquantum` (henceforth `tq`) to allow multi-GPU distr
   - Modules defining gates and containing trainable parameters similar to those in `tq.operator` (e.g. `X`, `CY`, `RZ`)
   - Measurement of all qubits in Pauli Z (computational) basis
   - Ability to extend the library with your own custom gates (n.b. does NOT check for unitarity!)
-  - (2025-05-22) Invertible backpropagation requires `nightly` install of pytorch: `pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu128`
+  - (2025-05-22) Invertible backpropagation requires `nightly` install of pytorch:
+    - For NVIDIA GPU: `pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu128`
+    - For AMD GPU: `pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/rocm6.4`
 
 ## Example usage
 ```python
