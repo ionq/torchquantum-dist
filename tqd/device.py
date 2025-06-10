@@ -56,7 +56,8 @@ class DistributedQuantumDevice:
         self.device_mesh = None
         if world_sz > 1:
             if not torch.distributed.is_initialized():
-                torch.distributed.init_process_group(world_size=world_sz)
+                #TODO: explicitly use nccl
+                torch.distributed.init_process_group(backend="nccl", init_method='env://', rank=global_rank, world_size=world_sz)
             self.device_mesh = init_device_mesh(device, (world_sz,))
 
         self.log2_devices = int(np.ceil(np.log2(world_sz)))
@@ -71,6 +72,7 @@ class DistributedQuantumDevice:
         self._states = torch.zeros(self.local_shape, device=self.device)
         if self.global_rank == 0:
             self._states[(slice(None), ) + (0, ) * (self._states.ndim - 1)] = 1
+            print(self.device_mesh)
         if self.world_sz > 1:
             placements = [Shard(i+1) for i in sharded_wires]
             self._states = DTensor.from_local(self._states, self.device_mesh, placements)
