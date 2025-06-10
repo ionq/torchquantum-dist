@@ -55,13 +55,15 @@ def scaling(batch, nq, world_sz):
         opt.step()
         if i==4:
             elapsed = time.time() - st
-    print(elapsed)
+    if rank == '0':
+        print(elapsed)
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('batch', type=int)
     parser.add_argument('nq', type=int)
+    parser.add_argument('ws', type=int)
 
     parser.add_argument("--master_addr", type=str, required=True)
     parser.add_argument("--master_port", type=str, required=True)
@@ -89,4 +91,6 @@ if __name__ == "__main__":
     os.environ['MASTER_PORT'] = str(args.master_port)
     os.environ['NCCL_SOCKET_IFNAME'] = 'hsn0'
 
-    scaling(args.batch, args.nq, world_size)
+    if rank == 0:
+        print(args, world_size)
+    scaling(args.batch, args.nq, args.ws)

@@ -30,4 +30,8 @@ rm -rf ${MIOPEN_USER_DB_PATH}
 mkdir -p ${MIOPEN_USER_DB_PATH}
 
 # Run script
-srun -N1 -n2 -c1 --gpus-per-task=1 --gpu-bind=closest python3 -W ignore -u ./scaling_frontier.py 16 4 --master_addr=$MASTER_ADDR --master_port=3442
+N=(1 2)
+B=(16 16)
+Q=(3 4)
+srun -N1 -n8 -c1 --gpus-per-task=1 --gpu-bind=closest python3 -W ignore -u ./scaling_frontier.py 64 12 8 --master_addr=$MASTER_ADDR --master_port=3442
+#srun -N1 -n2 -c1 --gpus-per-task=1 --gpu-bind=closest python3 -W ignore -u ./scaling_frontier.py 16 4 2 --master_addr=$MASTER_ADDR --master_port=3442

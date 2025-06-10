@@ -54,13 +54,12 @@ class DistributedQuantumDevice:
         if device =='cuda':
             torch.cuda.set_device(f'cuda:{local_rank}')
         self.device_mesh = None
+        self.log2_devices = int(np.ceil(np.log2(world_sz)))
         if world_sz > 1:
             if not torch.distributed.is_initialized():
-                #TODO: explicitly use nccl
                 torch.distributed.init_process_group(backend="nccl", init_method='env://', rank=global_rank, world_size=world_sz)
-            self.device_mesh = init_device_mesh(device, (world_sz,))
+            self.device_mesh = init_device_mesh(device, (2,) * self.log2_devices)
 
-        self.log2_devices = int(np.ceil(np.log2(world_sz)))
         # use 1st dim for batching, last dim for real/imag
         self.local_shape = (bsz, ) + (2, ) * (self.n_wires - self.log2_devices) + (1, ) * self.log2_devices + (2, )
         self.reset_states()
