@@ -63,7 +63,6 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('batch', type=int)
     parser.add_argument('nq', type=int)
-    parser.add_argument('ws', type=int)
 
     parser.add_argument("--master_addr", type=str, required=True)
     parser.add_argument("--master_port", type=str, required=True)
@@ -76,7 +75,7 @@ if __name__ == "__main__":
 
 
     num_gpus_per_node = torch.cuda.device_count()
-    print ("num_gpus_per_node = " + str(num_gpus_per_node), flush=True)
+    #print ("num_gpus_per_node = " + str(num_gpus_per_node), flush=True)
     args = parse_args()
 
     comm = MPI.COMM_WORLD
@@ -93,4 +92,4 @@ if __name__ == "__main__":
 
     if rank == 0:
         print(args, world_size)
-    scaling(args.batch, args.nq, args.ws)
+    scaling(args.batch, args.nq, world_size)

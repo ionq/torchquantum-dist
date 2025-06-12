@@ -71,7 +71,6 @@ class DistributedQuantumDevice:
         self._states = torch.zeros(self.local_shape, device=self.device)
         if self.global_rank == 0:
             self._states[(slice(None), ) + (0, ) * (self._states.ndim - 1)] = 1
-            print(self.device_mesh)
         if self.world_sz > 1:
             placements = [Shard(i+1) for i in sharded_wires]
             self._states = DTensor.from_local(self._states, self.device_mesh, placements)
