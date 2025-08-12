@@ -93,7 +93,9 @@ def apply_unitary_bmm(
     permuted_local_shape = [orig_local_shape[i] for i in permute_to]
     bsz = orig_local_shape[0]
     permuted = state.permute(permute_to)
-    perm_dm, perm_place = permuted.device_mesh, permuted.placements
+    is_dtensor = isinstance(state, DTensor)
+    if is_dtensor:
+        perm_dm, perm_place = permuted.device_mesh, permuted.placements
     permuted = torch.view_as_complex(maybe_to_local(permuted)).reshape([bsz, 2 ** len(wires), -1])
     if invertible_dummy is not None:
         invertible_dummy = invertible_dummy.permute(permute_to)
@@ -110,15 +112,17 @@ def apply_unitary_bmm(
         new_state, invertible_dummy = InvertibleUnitaryBMM.apply(mat, permuted, invertible_dummy)
     else:
         new_state = mat.bmm(permuted)
-    if is_dtensor:
-        new_state = DTensor.from_local(torch.view_as_real(new_state).view(permuted_local_shape), device_mesh=perm_dm, placements=perm_place)
-        if invertible_dummy is not None:
-            invertible_dummy = DTensor.from_local(torch.view_as_real(invertible_dummy).view(permuted_local_shape), device_mesh=perm_dm, placements=perm_place)
-    else:
-        new_state = torch.view_as_real(new_state).view(permuted_local_shape)
-        if invertible_dummy is not None:
-            invertible_dummy = torch.view_as_real(invertible_dummy).view(permuted_local_shape)
 
+    new_state, invertible_dummy = [
+        x if x is None else torch.view_as_real(x).view(permuted_local_shape)
+        for x in (new_state, invertible_dummy)
+    ]
+    if is_dtensor:
+        new_state, invertible_dummy = [
+            x if x is None else DTensor.from_local(x, device_mesh=perm_dm, placements=perm_place)
+            for x in (new_state, invertible_dummy)
+        ]
+    
     return new_state, new_wire_order, invertible_dummy
 
 def gate(
