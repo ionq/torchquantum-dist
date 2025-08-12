@@ -93,7 +93,9 @@ def apply_unitary_bmm(
     permuted_local_shape = [orig_local_shape[i] for i in permute_to]
     bsz = orig_local_shape[0]
     permuted = state.permute(permute_to)
-    perm_dm, perm_place = permuted.device_mesh, permuted.placements
+    is_dtensor = isinstance(permuted, DTensor)
+    if is_dtensor:
+        perm_dm, perm_place = permuted.device_mesh, permuted.placements
     permuted = torch.view_as_complex(maybe_to_local(permuted)).reshape([bsz, 2 ** len(wires), -1])
     if invertible_dummy is not None:
         invertible_dummy = invertible_dummy.permute(permute_to)
