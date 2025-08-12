@@ -8,6 +8,11 @@ from torch.distributed.tensor import DTensor
 
 from .matrices import GATE_MAT_DICT
 
+def maybe_to_local(tensor: torch.Tensor | DTensor) -> torch.Tensor | DTensor:
+    """
+    calls `.to_local()` if `tensor` is a `DTensor`, otherwise leaves it alone
+    """
+    return tensor.to_local() if isinstance(tensor, DTensor) else tensor
 
 class InvertibleUnitaryBMM(Function):
     """
@@ -84,25 +89,15 @@ def apply_unitary_bmm(
     permute_to = pre + post
     new_wire_order = [wire_order[d - 1] for d in permute_to]
     permute_to = [0] + permute_to + [state.dim()-1]
-    is_dtensor = isinstance(state, DTensor)
-    if is_dtensor:
-        orig_local_shape = state.to_local().shape
-    else:
-        orig_local_shape = state.shape
+    orig_local_shape = maybe_to_local(state).shape
     permuted_local_shape = [orig_local_shape[i] for i in permute_to]
     bsz = orig_local_shape[0]
     permuted = state.permute(permute_to)
-    if is_dtensor:
-        perm_dm, perm_place = permuted.device_mesh, permuted.placements
-        permuted = torch.view_as_complex(permuted.to_local()).reshape([bsz, 2 ** len(wires), -1])
-        if invertible_dummy is not None:
-            invertible_dummy = invertible_dummy.permute(permute_to)
-            invertible_dummy = torch.view_as_complex(invertible_dummy.to_local().contiguous()).reshape([bsz, 2 ** len(wires), -1])
-    else:
-        permuted = torch.view_as_complex(permuted).reshape([bsz, 2 ** len(wires), -1])
-        if invertible_dummy is not None:
-            invertible_dummy = invertible_dummy.permute(permute_to)
-            invertible_dummy = torch.view_as_complex(invertible_dummy.contiguous()).reshape([bsz, 2 ** len(wires), -1])
+    perm_dm, perm_place = permuted.device_mesh, permuted.placements
+    permuted = torch.view_as_complex(maybe_to_local(permuted)).reshape([bsz, 2 ** len(wires), -1])
+    if invertible_dummy is not None:
+        invertible_dummy = invertible_dummy.permute(permute_to)
+        invertible_dummy = torch.view_as_complex(maybe_to_local(invertible_dummy).contiguous()).reshape([bsz, 2 ** len(wires), -1])
     
     #permuted (b, m, k)
     #mat ([b,] n, m)
