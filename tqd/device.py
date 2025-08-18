@@ -170,7 +170,7 @@ class DistributedQuantumDevice:
                         
                         # Reshape to isolate grouped wire dimension, interchange wires, and then reshape back
                         new_state = state.reshape(temp_shape)
-                        new_state,_ = self.interchange_dims(new_state, grouping, grouped_wire_info[0], lone_wire_idx)
+                        new_state,_ = self.interchange_dims(new_state, grouping, grouped_wire_info[0], lone_wire_idx, new_state.ndim)
                         new_state = new_state.reshape(state_shape)
                         
                         new_grouping = grouping.detach().clone()
@@ -184,9 +184,9 @@ class DistributedQuantumDevice:
                 return new_state, new_grouping
         else:
             # Between ungrouped and sharded qubits, interchanging qubits is the same as interchanging dimensions
-            return self.interchange_dims(state, grouping, wire_info[0,0], wire_info[0,1])
+            return self.interchange_dims(state, grouping, wire_info[0,0], wire_info[0,1], state.ndim)
 
-    def interchange_dims(self, state: Union[DTensor, torch.Tensor], grouping: torch.Tensor, dim1: int, dim2: int) -> new_state: Union[DTensor, torch.Tensor], new_grouping = torch.Tensor:
+    def interchange_dims(self, state: Union[DTensor, torch.Tensor], grouping: torch.Tensor, dim1: int, dim2: int, num_dims: int) -> new_state: Union[DTensor, torch.Tensor], new_grouping = torch.Tensor:
         '''
         Interchanges two tensor dimensions, either groups of qubits or ungrouped qubits, and updates grouping tensor
         Note that relative orders within dimensions (or designations of ungrouped or sharded qubits, remain unchanged
@@ -195,16 +195,26 @@ class DistributedQuantumDevice:
             grouping: Tensor containing grouping info for state
             dim1: first dimension
             dim2: second dimension
+            num_dims: number of dimensions in states
         Results:
             new_state: new state with dimensions interchanged
             new_grouping: new grouping with dimensions interchanged
         '''
-        permute_list = list(range(self.num_dims))
+        permute_list = list(range(num_dims))
         permute_list[dim1], permute_list[dim2] = dim2, dim1
         new_state = state.permute(permute_list)
         new_grouping = grouping.detach().clone()
         new_grouping[0,new_grouping[0]==dim1], new_grouping[0, new_grouping[0]==dim2] = dim2, dim1
         return new_state, new_grouping
+
+    def noncanonical_states(self) -> Union[DTensor, torch.Tensor], torch.Tensor:
+        '''
+        Obtain device states and groupings without canonicalization (used for measurements)
+        The groupings are detached and cloned to prevent interference but the states are not to avoid unnecessary computations.
+        The expectation is that someone calling this function from outside the device would modify the statevector in such a way as to result in a copy of it,
+        instead of modifying inplace.
+        '''
+        return self._states, self._groupings.detach().clone()
 
     def canonicalize(self):
         # self._states, self._groupings, self._invertible_dummy = self.reorder(self._states, self._groupings, self._invertible_dummy)
