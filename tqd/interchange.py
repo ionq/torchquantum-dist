@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, Tuple
 
 import numpy as np
 import torch
@@ -6,7 +6,7 @@ import torch.distributed
 from torch.distributed.tensor import DTensor, Replicate, Shard
 
 
-def interchange_qubits(state: Union[DTensor, torch.Tensor], grouping: torch.Tensor, wire1: int, wire2: int) -> new_state: Union[DTensor, torch.Tensor], new_grouping: torch.Tensor:
+def interchange_qubits(state: Union[DTensor, torch.Tensor], grouping: torch.Tensor, wire1: int, wire2: int) -> [Union[DTensor, torch.Tensor], torch.Tensor]:
     '''
     Interchanges two qubits within a given statevector. Does not reshard on its own and can only interchange sharded qubits with ungrouped qubits.
     Operates recurseively based on a few base interchange patterns.
@@ -31,16 +31,16 @@ def interchange_qubits(state: Union[DTensor, torch.Tensor], grouping: torch.Tens
             else:
                 lone_wire_idx = wire_info[0,1]
                 # Get index and size of wire1 group along with relative position of wire1
-                grouped_wire_info = [wire_info[0,0].item(), wire_info[1,0].item(), grouping[0, grouping[0]==wire_info[0,0]].sum().item()]
+                grouped_wire_info = [wire_info[0,0].item(), wire_info[1,0].item(), (grouping[0] == wire_info[0,0]).sum().item()]
                 # grouped wires cannot be leftmost or rightmost dimensions; get index and size of left and right groups
-                left_group_info = [grouped_wire_info[0] - 1, grouping[0, grouping[0]==(grouped_wire_info[0] - 1)].sum().item()]
-                right_group_info = [grouped_wire_info[0] + 1, grouping[0, grouping[0]==(grouped_wire_info[0] + 1)].sum().item()]
+                left_group_info = [grouped_wire_info[0] - 1, (grouping[0]==(grouped_wire_info[0] - 1)).sum().item()]
+                right_group_info = [grouped_wire_info[0] + 1, (grouping[0]==(grouped_wire_info[0] + 1)).sum().item()]
  
                 need_left_interchange = (lone_wire_idx == left_group_info[0]) and (grouped_wire_info[1] > 0)
                 need_right_interchange = (lone_wire_idx == right_group_info[0]) and (grouped_wire_info[1] < grouped_wire_info[2] - 1)
                 need_interchange = need_left_interchange or need_right_interchange
                 if need_interchange:
-                    all_ungrouped_idxs = grouping[0,[grouping[1] == -1]]
+                    all_ungrouped_idxs = grouping[0,grouping[1] == -1]
                     # Pick a new ungrouped qubit that isn't adjacent to wire1
                     helper_idx = all_ungrouped_idxs[((all_ungrouped_idxs != left_group_info[0])&(all_ungrouped_idxs != right_group_info[0]))][0]
                     helper_qubit = (torch.nonzero(grouping[0] == helper_idx).flatten()[0]).int()
@@ -51,7 +51,7 @@ def interchange_qubits(state: Union[DTensor, torch.Tensor], grouping: torch.Tens
                 else:
                     # Get temporary tensor shape
                     state_shape = list(state.shape)
-                    temp_shape = state_shape
+                    temp_shape = state_shape.copy()
                     temp_shape[grouped_wire_info[0]] = 2
                     temp_shape[left_group_info[0]] = 2**(left_group_info[1] + grouped_wire_info[1])
                     temp_shape[right_group_info[0]] = 2**(right_group_info[1] + grouped_wire_info[2] - 1 - grouped_wire_info[1])
@@ -62,7 +62,7 @@ def interchange_qubits(state: Union[DTensor, torch.Tensor], grouping: torch.Tens
                     new_state = new_state.reshape(state_shape)
                         
                     new_grouping = grouping.detach().clone()
-                    new_grouping[:,wire1], new_grouping[:,wire2] = new_grouping[:,wire2], new_grouping[:,wire1]
+                    new_grouping[:,wire1], new_grouping[:,wire2] = grouping[:,wire2], grouping[:,wire1]
                     return new_state, new_grouping
         else: # If both wires are grouped, use ungrouped wire as medium of interchange
             helper_qubit = (torch.nonzero(grouping[1] == -1).flatten()[0]).int()
@@ -74,7 +74,7 @@ def interchange_qubits(state: Union[DTensor, torch.Tensor], grouping: torch.Tens
         # Between ungrouped and sharded qubits, interchanging qubits is the same as interchanging dimensions
         return interchange_dims(state, grouping, wire_info[0,0], wire_info[0,1], state.ndim)
 
-def interchange_dims(state: Union[DTensor, torch.Tensor], grouping: torch.Tensor, dim1: int, dim2: int, num_dims: int) -> new_state: Union[DTensor, torch.Tensor], new_grouping = torch.Tensor:
+def interchange_dims(state: Union[DTensor, torch.Tensor], grouping: torch.Tensor, dim1: int, dim2: int, num_dims: int) -> [Union[DTensor, torch.Tensor], torch.Tensor]:
     '''
     Interchanges two tensor dimensions, either groups of qubits or ungrouped qubits, and updates grouping tensor
     Note that relative orders within dimensions (or designations of ungrouped or sharded qubits, remain unchanged
@@ -89,8 +89,10 @@ def interchange_dims(state: Union[DTensor, torch.Tensor], grouping: torch.Tensor
         new_grouping: new grouping with dimensions interchanged
     '''
     permute_list = list(range(num_dims))
-    permute_list[dim1], permute_list[dim2] = dim2, dim1
+    permute_list[dim1], permute_list[dim2] = permute_list[dim2], permute_list[dim1]
     new_state = state.permute(permute_list)
     new_grouping = grouping.detach().clone()
-    new_grouping[0,new_grouping[0]==dim1], new_grouping[0, new_grouping[0]==dim2] = dim2, dim1
+    where_dim1 = new_grouping[0] == dim1
+    where_dim2 = new_grouping[0] == dim2
+    new_grouping[0, where_dim1], new_grouping[0, where_dim2] = dim2, dim1
     return new_state, new_grouping

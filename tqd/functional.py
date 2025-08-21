@@ -9,7 +9,7 @@ from torch.distributed.tensor import DTensor
 from .matrices import GATE_MAT_DICT
 from .interchange import interchange_qubits, interchange_dims
 
-def maybe_to_local(tensor: torch.Tensor | DTensor) -> torch.Tensor | DTensor:
+def maybe_to_local(tensor: Union[torch.Tensor, DTensor]) -> Union[torch.Tensor, DTensor]:
     """
     calls `.to_local()` if `tensor` is a `DTensor`, otherwise leaves it alone
     """
@@ -77,23 +77,27 @@ def apply_unitary_bmm(
 
     """
     mat = mat.to(state.device)
+    if isinstance(wires, int):
+        wires = [wires]
 
     # First ensure wires are ungrouped
     eligible_ungroups = list(set(torch.nonzero(grouping[1] ==-1 ).flatten().tolist()) - set(wires))
     for wire in wires:
         if grouping[1,wire] > -1:
             ungroup = eligible_ungroups.pop(0)
-        if invertible_dummy is not None:
-            invertible_dummy,_ = interchange_qubits(invertible_dummy, grouping, wire, ungroup)
-        state, grouping = interchange_qubits(state, grouping, wire, ungroup)
+            if invertible_dummy is not None:
+                invertible_dummy,_ = interchange_qubits(invertible_dummy, grouping, wire, ungroup)
+            state, grouping = interchange_qubits(state, grouping, wire, ungroup)
 
-    num_dims = state.ndims
+    num_dims = state.ndim
     wire_dims = grouping[0,wires].tolist()
     # Move wire dimensions into first qubit dimensions
-    for i in len(wires):
-        if invertible_dummy is not None:
-            invertible_dummy,_ = interchange_dims(invertible_dummy, grouping, wire_dims[i], i+1, num_dims)
-        state, grouping = interchange_dims(state, grouping, wire_dims[i], i+1, num_dims)
+    for i in range(len(wires)):
+        current_dim = grouping[0,wires[i]].item()
+        if current_dim != i+1:
+            if invertible_dummy is not None:
+                invertible_dummy,_ = interchange_dims(invertible_dummy, grouping, current_dim, i+1, num_dims)
+            state, grouping = interchange_dims(state, grouping, current_dim, i+1, num_dims)
 
     local_shape = maybe_to_local(state).shape
     bsz = local_shape[0]
@@ -102,7 +106,7 @@ def apply_unitary_bmm(
         dtensor_mesh, dtensor_placements = state.device_mesh, state.placements
     if invertible_dummy is not None:
         invertible_dummy = torch.view_as_complex(maybe_to_local(invertible_dummy).contiguous()).reshape([bsz, 2**len(wires), -1])
-    permuted = torch.view_as_complex(maybe_to_local(local_state)).reshape([bsz, 2**len(wires), -1])
+    permuted = torch.view_as_complex(maybe_to_local(state)).reshape([bsz, 2**len(wires), -1])
     
     #permuted (b, m, k)
     #mat ([b,] n, m)
@@ -117,7 +121,7 @@ def apply_unitary_bmm(
         new_state = mat.bmm(permuted)
 
     new_state, invertible_dummy = [
-        x if x is None else torch.view_as_real(x).view(local_shape)
+        x if x is None else torch.view_as_real(x).reshape(local_shape)
         for x in (new_state, invertible_dummy)
     ]
     if is_dtensor:
@@ -127,12 +131,15 @@ def apply_unitary_bmm(
         ]
 
     new_grouping = grouping
+    permuted_state = torch.view_as_complex(new_state.full_tensor().cpu()[0]).flatten()
     # Rearrange dims back in place
-    for i in len(wires):
-        if invertible_dummy is not None:
-            invertible_dummy,_ = interchange_dims(invertible_dummy, grouping, wire_dims[i], i+1, num_dims)
-        new_state, new_grouping = interchange_dims(new_state, new_grouping, wire_dims[i], i+1, num_dims)
-    
+    for i in range(len(wires)):
+        current_dim = grouping[0,wires[i]].item()
+        if current_dim != wire_dims[i]:
+            if invertible_dummy is not None:
+                invertible_dummy,_ = interchange_dims(invertible_dummy, grouping, wire_dims[i], current_dim, num_dims)
+            new_state, new_grouping = interchange_dims(new_state, new_grouping, wire_dims[i], current_dim, num_dims)
+
     return new_state, new_grouping, invertible_dummy
 
 def gate(

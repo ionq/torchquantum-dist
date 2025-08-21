@@ -5,6 +5,60 @@ import tqd
 from torch.distributed.tensor import DTensor, Partial, Replicate
 
 
+def test_groupings(verbose = False):
+    '''
+    Testing qubit groupings inside dtensor
+    '''
+    rank = os.environ['RANK']
+    max_dtensor_dims = 7
+    nq = 7
+    wire = 1
+    world_sz = 2
+
+    qdev = tqd.DistributedQuantumDevice(
+            nq,
+            device=f'cuda',
+            world_sz = world_sz,
+            max_dtensor_dims = max_dtensor_dims
+            )
+
+    if verbose:
+        print(f'before {rank} {qdev.states}')
+
+    # test class method
+    qdev.y(wires=[wire])
+    if verbose:
+        print(f'after y {rank} {qdev.states}')
+
+    # test Module
+    cx_gate = tqd.CX(wires=[wire, (wire+3) % nq])
+    cx_gate(qdev)
+    if verbose:
+        print(f'after cx {rank} {qdev.states}')
+
+    # test functional
+    tqd.rz(qdev, wires=[(wire+2)%nq], params=torch.pi/3)
+    if verbose:
+        print(f'after rz {rank} {qdev.states}')
+
+    # test registration
+    tqd.custom.register_gate('i', torch.eye(2, dtype=torch.cfloat))
+    tqd.custom.i(qdev, wires=[1])
+
+    if verbose:
+        print(f'after {rank} {qdev.states}')
+        print(f'done {qdev.states.full_tensor()}')
+
+    qdev.canonicalize()
+    # test noisy non-differentiable (sampling) measurement
+    meas_samp = tqd.measure_allZ(qdev, shots=int(1e5), training=False)
+
+    # test noisy differentiable (approximate) measurement
+    meas_approx = tqd.measure_allZ(qdev, shots=int(1e5), training=True)
+   
+    if rank == '0':
+        print('groupings test passed!')
+
 def test_dqd(verbose=False):
     """
     monotest
@@ -212,3 +266,4 @@ if __name__ == "__main__":
     test_noisy_meas(False)
     test_encoder(False)
     test_grads(False)
+    test_groupings(False)

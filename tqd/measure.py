@@ -88,33 +88,53 @@ def measure_allZ(
 
     probs = torch.zeros((state_mag_noisy.shape[0], q_device.n_wires, 2), device=state_mag_noisy.device)
     # First reduce along sharded dimensions, then calculate probs for unsharded qubits
-    shard_reduced_state_mag = state_mag_noisy.sum(list(groupings[0,sharded_wires]))
-    remaining_dims = np.arange(1, shard_reduced_state_mag.ndim)
+    sharded_reduce_list = list(groupings[0,sharded_wires])
+    if sharded_reduce_list:
+        shard_reduced_state_mag = state_mag_noisy.sum(list(groupings[0,sharded_wires]))
+    else:
+        shard_reduced_state_mag = state_mag_noisy
+    remaining_dims = torch.arange(1, shard_reduced_state_mag.ndim, device=state_mag_noisy.device)
     for wire in ungrouped_wires:
-        prob_ = shard_reduced_state_mag.sum(list(np.delete(remaining_dims, groupings[0, wire].tolist())))
+        reduce_list = remaining_dims[remaining_dims != groupings[0,wire].item()].tolist()
+        if reduce_list:
+            prob_ = shard_reduced_state_mag.sum(reduce_list)
+        else:
+            prob_ = shard_reduced_state_mag
+        if q_device.world_sz > 1:
+            prob_ = prob_.full_tensor()
         probs[:,wire,:] = prob_
 
     # pick ungrouped wire to interchange with all grouped wires
     prev_wire = ungrouped_wires[0]
-    reduction_dims = np.delete(remaining_dims, groupings[0, prev_wire].tolist()) # Unreduced dim remains the same as qubits are shunted around
+    reduction_dims = remaining_dims[remaining_dims != groupings[0, prev_wire].item()].tolist() # Unreduced dim remains the same as qubits are shunted around
     shard_reduced_groupings = groupings.detach().clone()
     for wire in grouped_wires:
         shard_reduced_state_mag, shard_reduced_groupings = q_device.interchange_qubits(shard_reduced_state_mag, shard_reduced_groupings, wire, prev_wire)
-        prob_ = shard_reduced_state_mag.sum(list(reduction_dims))
+        prob_ = shard_reduced_state_mag.sum(reduction_dims)
+        if q_device.world_sz > 1:
+            prob_ = prob_.full_tensor()
         probs[:,wire,:] = prob_
         prev_wire = wire
 
     # Then reduce unsharded dimensions and calculate probs for sharded qubits
-    only_shard_state_mag = state_mag_noisy.sum(list(np.delete(numpy.arange(1, state_mag_noisy.ndim), groupings[0,sharded_wires].numpy())))
-    remaining_dims = np.arange(1, q_device.log2_devices)
+    remaining_dims = torch.arange(1, state_mag_noisy.ndim, device=state_mag_noisy.device)
+    unshard_mask = torch.ones(remaining_dims.shape, dtype=bool, device=remaining_dims.device)
+    for wire in sharded_wires:
+        unshard_mask &= (remaining_dims != groupings[0,wire].item())
+    only_shard_state_mag = state_mag_noisy.sum(remaining_dims[unshard_mask].tolist())
+    remaining_dims = torch.arange(1, q_device.log2_devices, device=remaining_dims.device)
     only_shard_groupings = groupings.detach().clone()
     only_shard_groupings[0, sharded_wires] -= min(only_shard_groupings[0, sharded_wires]) - 1 # reindex sharded dimensions for reduced tensor
     for wire in sharded_wires:
-        prob_ = only_shard_state_mag.sum(list(np.delete(remaining_dims, only_shard_groupings[0, wire].tolist())))
+        reduce_list = remaining_dims[remaining_dims != only_shard_groupings[0,wire].item()].tolist()
+        if reduce_list:
+            prob_ = only_shard_state_mag.sum(reduce_list)
+        else:
+            prob_ = only_shard_state_mag
+        if q_device.world_sz > 1:
+            prob_ = prob_.full_tensor()
         probs[:,wire,:] = prob_
 
-    if q_device.world_sz > 1:
-        probs = probs.full_tensor()  # all gather (b, q, 2)
     y = probs @ torch.tensor([1., -1.], device=probs.device)  # hardcoded PauliZ
 
     return y  # (b, q)

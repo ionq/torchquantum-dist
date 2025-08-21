@@ -48,7 +48,7 @@ class DistributedQuantumDevice:
         self.invertible = invertible
 
         # Bind interchange function
-        DistributedQuantumDevice.interchange_qubits = interchange_qubits
+        self.interchange_qubits = interchange_qubits
 
         # set up distributed
         self.world_sz = world_sz
@@ -70,7 +70,10 @@ class DistributedQuantumDevice:
         # use 1st dim for batching, last dim for real/imag
         if self.n_wires < max_dtensor_dims - 2:
             self.local_shape = (bsz, ) + (2, ) * (self.n_wires - self.log2_devices) + (1, ) * self.log2_devices + (2, )
-            self._groupings[0] = torch.arange(self.n_wires) # Each qubit is own group
+            self._groupings[0] = torch.arange(self.n_wires) + 1 # Each qubit is own group
+            self._groupings[1] = -1
+            self._groupings[1, -self.log2_devices:] = -2
+            qubit_idx = self.n_wires - self.log2_devices
         else:
             # Number of possible dimensions for grouping equals total dimension number minus batching dim, real/imag dim, sharding dims, and two single-qubit dims
             num_grouped_dims = max_dtensor_dims - 4 - self.log2_devices
@@ -82,12 +85,12 @@ class DistributedQuantumDevice:
             # Arrange groupings according to grouped_dimensions
             # First and last groupings always contain only 1 qubit
             # Second row designation of -1 includes ungrouped qubit, -2 designations sharded qubit
-            self._groupings[:,0] = torch.Tensor([1,-1], dtype=torch.int)
+            self._groupings[:,0] = torch.Tensor([1,-1]).int()
             qubit_idx = 1
-            for i in in range(len(group_nums)):
+            for i in range(len(group_nums)):
                 self._groupings[0,qubit_idx:qubit_idx + group_nums[i]] = i + 2
                 if group_nums[i] == 1:
-                    self_groupings[1, qubit_idx] = -1
+                    self._groupings[1, qubit_idx] = -1
                 else:
                     self._groupings[1,qubit_idx:qubit_idx + group_nums[i]] = torch.arange(group_nums[i])
                 qubit_idx += group_nums[i]
@@ -102,13 +105,13 @@ class DistributedQuantumDevice:
         self.reset_states()
 
     def reset_states(self):
-        # shard along last wire dimensions: assume that first computations use lower number wires
-        sharded_wires = (self._groupings[:,(self._groupings[1] == -1)][0][-self.log2_devices:]).tolist()
+        # shard along designated initial wires
+        sharded_wires = (self._groupings[:,(self._groupings[1] == -2)][0]).tolist()
         self._states = torch.zeros(self.local_shape, device=self.device)
         if self.global_rank == 0:
             self._states[(slice(None), ) + (0, ) * (self._states.ndim - 1)] = 1
         if self.world_sz > 1:
-            placements = [Shard(i+1) for i in sharded_wires]
+            placements = [Shard(i) for i in sharded_wires]
             self._states = DTensor.from_local(self._states, self.device_mesh, placements)
 
         if self.invertible:
@@ -124,7 +127,7 @@ class DistributedQuantumDevice:
             self._invertible_dummy = None
 
     @property
-    def noncanonical_states(self) -> Union[DTensor, torch.Tensor], torch.Tensor:
+    def noncanonical_states(self) -> [Union[DTensor, torch.Tensor], torch.Tensor]:
         '''
         Obtain device states and groupings without canonicalization (used for measurements)
         The groupings are detached and cloned to prevent interference but the states are not to avoid unnecessary computations.
@@ -150,7 +153,6 @@ class DistributedQuantumDevice:
                 relative_order = self._groupings[1,group_mask].argsort()
                 group_wires = group_wires[relative_order]
             wire_order = torch.cat((wire_order, group_wires))
-
         # Now interchange qubits until they are all in the proper order
         for i in range(self.n_wires):
             if wire_order[i] == i:
@@ -164,15 +166,15 @@ class DistributedQuantumDevice:
     @property
     def states(self):
         self.canonicalize()
-        return self._states.detach().clone()
+        return self._states
 
     @property
     def invertible_dummy(self):
         if self._invertible_dummy is not None:
             self.canonicalize()
-            return self._invertible_dummy.detach().clone()
+            return self._invertible_dummy
 
-    def maybe_reshard(self, wires: list[int], ignore: list[int], inverse: bool=False):
+    def maybe_reshard(self, wires: list[int], ignore: list[int] = [], inverse: bool=False):
         """
         If the current sharding splits the statevector in the dimension that is acted upon by the
         gate, picks a new dimension to shard over and redistributes the statevector accordingly.
@@ -233,12 +235,13 @@ class DistributedQuantumDevice:
             for i in range(len(switch_qubits)):
                 # Interchange uncoupled selected qubits and sharded qubits in anticipation of resharding
                 if self._invertible_dummy is not None:
-                    self.invertible_dummy,_ = self.interchange_qubits(self._invertible_dummy, self.groupings, switch_qubits[i], list(overlap)[i])
-                self._states, self._groupings = self.interchange_qubits(self._states, self.groupings, switch_qubits[i], list(overlap)[i])
+                    self.invertible_dummy,_ = self.interchange_qubits(self._invertible_dummy, self._groupings, switch_qubits[i], list(overlap)[i])
+                self._states, self._groupings = self.interchange_qubits(self._states, self._groupings, switch_qubits[i], list(overlap)[i])
                 self._groupings[1,switch_qubits[i]], self._groupings[1,list(overlap)[i]] = -2, -1
             new_qubit_sharding = new_qubit_sharding.union(switch_qubits)
             # all2all
-            new_dim_sharding = [self._groupings[0, w] for w in new_qubit_sharding].sort()
+            new_dim_sharding = [self._groupings[0, w].item() for w in new_qubit_sharding]
+            new_dim_sharding.sort()
             self._states = self._states.redistribute(self.device_mesh, placements=[Shard(d) for d in new_dim_sharding])
             if self._invertible_dummy is not None:
                 self._invertible_dummy = self._invertible_dummy.redistribute(self.device_mesh, placements=[Shard(d) for d in new_dim_sharding])
