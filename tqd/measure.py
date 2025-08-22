@@ -123,7 +123,7 @@ def measure_allZ(
         for wire in sharded_wires:
             unshard_mask &= (remaining_dims != groupings[0,wire].item())
         only_shard_state_mag = state_mag_noisy.sum(remaining_dims[unshard_mask].tolist())
-        remaining_dims = torch.arange(1, q_device.log2_devices, device=remaining_dims.device)
+        remaining_dims = torch.arange(1, q_device.log2_devices + 1, device=remaining_dims.device)
         only_shard_groupings = groupings.detach().clone()
         only_shard_groupings[0, sharded_wires] -= min(only_shard_groupings[0, sharded_wires]) - 1 # reindex sharded dimensions for reduced tensor
         for wire in sharded_wires:
