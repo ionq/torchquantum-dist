@@ -72,7 +72,8 @@ class DistributedQuantumDevice:
             self.local_shape = (bsz, ) + (2, ) * (self.n_wires - self.log2_devices) + (1, ) * self.log2_devices + (2, )
             self._groupings[0] = torch.arange(self.n_wires) + 1 # Each qubit is own group
             self._groupings[1] = -1
-            self._groupings[1, -self.log2_devices:] = -2
+            if self.log2_devices > 0:
+                self._groupings[1, -self.log2_devices:] = -2
             qubit_idx = self.n_wires - self.log2_devices
         else:
             # Number of possible dimensions for grouping equals total dimension number minus batching dim, real/imag dim, sharding dims, and two single-qubit dims

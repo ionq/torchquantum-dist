@@ -117,23 +117,24 @@ def measure_allZ(
         prev_wire = wire
 
     # Then reduce unsharded dimensions and calculate probs for sharded qubits
-    remaining_dims = torch.arange(1, state_mag_noisy.ndim, device=state_mag_noisy.device)
-    unshard_mask = torch.ones(remaining_dims.shape, dtype=bool, device=remaining_dims.device)
-    for wire in sharded_wires:
-        unshard_mask &= (remaining_dims != groupings[0,wire].item())
-    only_shard_state_mag = state_mag_noisy.sum(remaining_dims[unshard_mask].tolist())
-    remaining_dims = torch.arange(1, q_device.log2_devices, device=remaining_dims.device)
-    only_shard_groupings = groupings.detach().clone()
-    only_shard_groupings[0, sharded_wires] -= min(only_shard_groupings[0, sharded_wires]) - 1 # reindex sharded dimensions for reduced tensor
-    for wire in sharded_wires:
-        reduce_list = remaining_dims[remaining_dims != only_shard_groupings[0,wire].item()].tolist()
-        if reduce_list:
-            prob_ = only_shard_state_mag.sum(reduce_list)
-        else:
-            prob_ = only_shard_state_mag
-        if q_device.world_sz > 1:
-            prob_ = prob_.full_tensor()
-        probs[:,wire,:] = prob_
+    if q_device.log2_devices > 0:
+        remaining_dims = torch.arange(1, state_mag_noisy.ndim, device=state_mag_noisy.device)
+        unshard_mask = torch.ones(remaining_dims.shape, dtype=bool, device=remaining_dims.device)
+        for wire in sharded_wires:
+            unshard_mask &= (remaining_dims != groupings[0,wire].item())
+        only_shard_state_mag = state_mag_noisy.sum(remaining_dims[unshard_mask].tolist())
+        remaining_dims = torch.arange(1, q_device.log2_devices, device=remaining_dims.device)
+        only_shard_groupings = groupings.detach().clone()
+        only_shard_groupings[0, sharded_wires] -= min(only_shard_groupings[0, sharded_wires]) - 1 # reindex sharded dimensions for reduced tensor
+        for wire in sharded_wires:
+            reduce_list = remaining_dims[remaining_dims != only_shard_groupings[0,wire].item()].tolist()
+            if reduce_list:
+                prob_ = only_shard_state_mag.sum(reduce_list)
+            else:
+                prob_ = only_shard_state_mag
+            if q_device.world_sz > 1:
+                prob_ = prob_.full_tensor()
+            probs[:,wire,:] = prob_
 
     y = probs @ torch.tensor([1., -1.], device=probs.device)  # hardcoded PauliZ
 
