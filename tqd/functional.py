@@ -131,7 +131,6 @@ def apply_unitary_bmm(
         ]
 
     new_grouping = grouping
-    permuted_state = torch.view_as_complex(new_state.full_tensor().cpu()[0]).flatten()
     # Rearrange dims back in place
     for i in range(len(wires)):
         current_dim = grouping[0,wires[i]].item()
