@@ -235,7 +235,7 @@ class DistributedQuantumDevice:
             for i in range(len(switch_qubits)):
                 # Interchange uncoupled selected qubits and sharded qubits in anticipation of resharding
                 if self._invertible_dummy is not None:
-                    self.invertible_dummy,_ = self.interchange_qubits(self._invertible_dummy, self._groupings, switch_qubits[i], list(overlap)[i])
+                    self._invertible_dummy,_ = self.interchange_qubits(self._invertible_dummy, self._groupings, switch_qubits[i], list(overlap)[i])
                 self._states, self._groupings = self.interchange_qubits(self._states, self._groupings, switch_qubits[i], list(overlap)[i])
                 self._groupings[1,switch_qubits[i]], self._groupings[1,list(overlap)[i]] = -2, -1
             new_qubit_sharding = new_qubit_sharding.union(switch_qubits)
