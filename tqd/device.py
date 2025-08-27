@@ -222,17 +222,22 @@ class DistributedQuantumDevice:
             # this happens to be the same for inverse and not!
             best_usable_qubits = [q_ for q_ in usable_qubits if q_ > max_wire] + [q_ for q_ in usable_qubits if q_ < min_wire]
             uncoupled_qubits = torch.nonzero(self._groupings[1] == -1).flatten().tolist()
-            switch_qubits = []
-            for i in range(len(overlap)):
-                if inverse:
-                    next_usable_qubit = best_usable_qubits[i]
-                else:
-                    next_usable_qubit = best_usable_qubits[-1-i]
-                # Move selected usable qubits into uncoupled dimensions (there are always at least 2 uncoupled qubits and at most 2 qubits selected)
-                if self._invertible_dummy is not None:
-                    self._invertible_dummy,_ = self.interchange_qubits(self._invertible_dummy, self._groupings, next_usable_qubit, uncoupled_qubits[i])
-                self._states, self._groupings = self.interchange_qubits(self._states, self._groupings, next_usable_qubit, uncoupled_qubits[i])
-                switch_qubits.append(next_usable_qubit)
+            # Select qubits to use in resharding
+            if inverse:
+                switch_qubits = best_usable_qubits[:len(overlap)]
+            else:
+                switch_qubits = best_usable_qubits[-len(overlap):]
+            already_uncoupled = list(set(uncoupled_qubits) & set(switch_qubits))
+            needs_uncoupling = list(set(switch_qubits) - set(uncoupled_qubits))
+            dummy_uncoupled = list(set(uncoupled_qubits) - set(switch_qubits))
+            switch_qubits = already_uncoupled + needs_uncoupling
+            # Move selected usable qubits into uncoupled dimensions (there are always at least 2 uncoupled qubits and at most 2 qubits selected)
+            if needs_uncoupling:
+                for i in range(len(needs_uncoupling)):
+                    if self._invertible_dummy is not None:
+                        self._invertible_dummy,_ = self.interchange_qubits(self._invertible_dummy, self._groupings, needs_uncoupling[i], dummy_uncoupled[i])
+                    self._states, self._groupings = self.interchange_qubits(self._states, self._groupings, needs_uncoupling[i], dummy_uncoupled[i])
+            # All switch qubits are now uncoupled
             for i in range(len(switch_qubits)):
                 # Interchange uncoupled selected qubits and sharded qubits in anticipation of resharding
                 if self._invertible_dummy is not None:
