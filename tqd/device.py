@@ -9,7 +9,7 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Replicate, Shard
 
 from . import functional, matrices
-from .interchange import interchange_qubits
+from .utils.interchange import interchange_qubits
 
 
 class DistributedQuantumDevice:

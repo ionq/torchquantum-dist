@@ -7,13 +7,8 @@ from torch.autograd import Function, backward
 from torch.distributed.tensor import DTensor
 
 from .matrices import GATE_MAT_DICT
-from .interchange import interchange_qubits, interchange_dims
-
-def maybe_to_local(tensor: Union[torch.Tensor, DTensor]) -> Union[torch.Tensor, DTensor]:
-    """
-    calls `.to_local()` if `tensor` is a `DTensor`, otherwise leaves it alone
-    """
-    return tensor.to_local() if isinstance(tensor, DTensor) else tensor
+from .utils.interchange import interchange_qubits, interchange_dims
+from .utils.maybe_dtensor import maybe_to_local, maybe_get_dtensor_info, maybe_from_local
 
 class InvertibleUnitaryBMM(Function):
     """
@@ -101,9 +96,7 @@ def apply_unitary_bmm(
 
     local_shape = maybe_to_local(state).shape
     bsz = local_shape[0]
-    is_dtensor = isinstance(state, DTensor)
-    if is_dtensor:
-        dtensor_mesh, dtensor_placements = state.device_mesh, state.placements
+    dtensor_mesh, dtensor_placements = maybe_get_dtensor_info(state)
     if invertible_dummy is not None:
         invertible_dummy = torch.view_as_complex(maybe_to_local(invertible_dummy).contiguous()).reshape([bsz, 2**len(wires), -1])
     permuted = torch.view_as_complex(maybe_to_local(state)).reshape([bsz, 2**len(wires), -1])
@@ -121,14 +114,9 @@ def apply_unitary_bmm(
         new_state = mat.bmm(permuted)
 
     new_state, invertible_dummy = [
-        x if x is None else torch.view_as_real(x).reshape(local_shape)
+        x if x is None else maybe_from_local(torch.view_as_real(x).reshape(local_shape), device_mesh=dtensor_mesh, placements=dtensor_placements)
         for x in (new_state, invertible_dummy)
     ]
-    if is_dtensor:
-        new_state, invertible_dummy = [
-            x if x is None else DTensor.from_local(x, device_mesh=dtensor_mesh, placements=dtensor_placements)
-            for x in (new_state, invertible_dummy)
-        ]
 
     new_grouping = grouping
     # Rearrange dims back in place

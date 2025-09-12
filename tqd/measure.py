@@ -66,7 +66,7 @@ def sampler_nondiff_exact(
     return state_mag_noisy
 
 def measure_allZ(
-    q_device, shots: int=0, training: bool=False
+        q_device, shots: int=0, postselect_cond: dict[int, int]=None, training: bool=False
 ):
     states, groupings  = q_device.noncanonical_states
     sharded_wires = torch.nonzero(groupings[1] == -2).flatten()
@@ -74,6 +74,14 @@ def measure_allZ(
     ungrouped_wires = torch.nonzero(groupings[1] == -1).flatten()
     
     state_mag = (states ** 2).sum(-1)  # PauliZ hardocded here; no rotation before grabbing probabilities
+
+    # postselect_cond dictionary determines whether to ignore slices of state_mag (i.e. {0: 1} indicates wire zero should be |1>)
+    if postselect_cond is not None:
+        local_mask = torch.ones(q_device.to_local().size(), device=q_device.device)
+        full_mask = DTensor.from_local(local_mask, device_mesh=q_device.device_mesh, placements=q_device.placements)
+        post_wires, post_bits = [list(item) for item in postselect_cond.items()]
+        post_groups = groupings[:, post_wires]
+        # TODO: Build Postselection mask
 
     if shots > 0:
         if not training:
