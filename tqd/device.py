@@ -52,8 +52,12 @@ class DistributedQuantumDevice:
 
         # set up distributed
         self.world_sz = world_sz
-        local_rank = int(os.environ['LOCAL_RANK'])
-        global_rank = int(os.environ['RANK'])
+        if world_sz > 1:
+            local_rank = int(os.environ['LOCAL_RANK'])
+            global_rank = int(os.environ['RANK'])
+        else:
+            local_rank = 0
+            global_rank = 0
         self.local_rank = local_rank
         self.global_rank = global_rank
         if device =='cuda':

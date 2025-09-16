@@ -424,7 +424,7 @@ def test_noisy_meas(verbose=False):
     meas_tq = torch.Tensor([[1., torch.sqrt(torch.tensor([3]))/2, 1.]])
 
     # test noisy non-differentiable (sampling) measurement
-    meas_samp = tqd.measure_allZ(qdev, shots=int(1e5), training=False)
+    meas_samp,_ = tqd.measure_allZ(qdev, shots=int(1e5), training=False, postselect_cond={0:0})
 
     # test noisy differentiable (approximate) measurement
     meas_approx = tqd.measure_allZ(qdev, shots=int(1e5), training=True)

@@ -1,22 +1,26 @@
 import numpy as np
 import torch
+from typing import Union
 from torch.distributed.tensor import DTensor
 
+from .utils.maybe_dtensor import is_dtensor, maybe_to_local, maybe_get_dtensor_info, maybe_from_local, maybe_full_tensor
+
 def sampler_diff_approx(
-    state_mag: DTensor, shots: int, global_rank: int, world_sz: int
-) -> DTensor:
+    state_mag: Union[torch.Tensor, DTensor], shots: int, global_rank: int, world_sz: int
+) -> Union[torch.Tensor, DTensor]:
     # state_mag is a batch of state vectors
     p = state_mag
     # cheap good gaussian: https://stats.stackexchange.com/a/454431
     p_2 = torch.sqrt(p + 1e-16)  # eps to avoid nan in gradient at 0
 
-    z = torch.randn(p.to_local().size(), device=p.device)
-    e_d = torch.zeros(p.to_local().size(), device=p.device)
+    z = torch.randn(maybe_to_local(p).size(), device=p.device)
+    e_d = torch.zeros(maybe_to_local(p).size(), device=p.device)
     if global_rank == world_sz - 1:
         z[-1] = 0
         e_d[-1] = 1
-    z = DTensor.from_local(z, device_mesh=p.device_mesh, placements=p.placements)
-    e_d = DTensor.from_local(e_d, device_mesh=p.device_mesh, placements=p.placements)
+    p_device_mesh, p_placements = maybe_get_dtensor_info(p)
+    z = maybe_from_local(z, device_mesh=p_device_mesh, placements=p_placements)
+    e_d = maybe_from_local(e_d, device_mesh=p_device_mesh, placements=p_placements)
 
     # all-reduce
     reduce_dims = tuple(range(1, p.ndim))
@@ -32,23 +36,26 @@ def sampler_diff_approx(
     return state_mag_noisy
 
 def sampler_nondiff_exact(
-    state_mag: DTensor, shots: int, global_rank: int, *unused_args
-) -> DTensor:
+    state_mag: Union[torch.Tensor, DTensor], shots: int, global_rank: int, *unused_args
+) -> Union[torch.Tensor, DTensor]:
     # state_mag is a batch of state vectors
     # hierarchical: first figure out N_i for i-th GPU, then within each GPU, sample N_i.
     # assumes all workers share a rng state
-    orig_shape_local = state_mag.to_local().shape
-    shard_dims = [s_.dim for s_ in state_mag.placements if hasattr(s_, "dim")]
+    orig_shape_local = maybe_to_local(state_mag).shape
+    state_mag_device_mesh, state_mag_placements = maybe_get_dtensor_info(state_mag)
+    shard_dims = [s_.dim for s_ in state_mag_placements if hasattr(s_, "dim")]
     reduce_dims = np.delete(list(range(state_mag.ndim)), [0] + shard_dims)
     gpu_probs = state_mag.sum(list(reduce_dims))  # shouldn't require comms
-    gpu_probs = gpu_probs.full_tensor().view((orig_shape_local[0], -1))  # all gather  # (b, n_gpus)
+    gpu_probs = maybe_full_tensor(gpu_probs).view((orig_shape_local[0], -1))  # all gather  # (b, n_gpus)
 
-
-    local_shots = torch.distributions.multinomial.Multinomial(shots, gpu_probs).sample()
-    local_shots = local_shots[:, global_rank]
+    if is_dtensor(state_mag):
+        local_shots = torch.distributions.multinomial.Multinomial(shots, gpu_probs).sample()
+        local_shots = local_shots[:, global_rank]
+    else:
+        local_shots = shots*torch.ones(orig_shape_local[0], device=state_mag.device)
 
     state_mag_noisy = []
-    state_mag_local = state_mag.to_local()
+    state_mag_local = maybe_to_local(state_mag)
     # TODO: seems multinomial sampling isn't vectorized
     for i in range(orig_shape_local[0]):
         local_shots_ = int(local_shots[i].item())
@@ -62,11 +69,11 @@ def sampler_nondiff_exact(
             state_mag_noisy_ = torch.zeros(orig_shape_local[1:], device=state_mag.device)
         state_mag_noisy.append(state_mag_noisy_)
     state_mag_noisy = torch.stack(state_mag_noisy)
-    state_mag_noisy = DTensor.from_local(state_mag_noisy, device_mesh=state_mag.device_mesh, placements=state_mag.placements)
+    state_mag_noisy = maybe_from_local(state_mag_noisy, device_mesh=state_mag_device_mesh, placements=state_mag_placements)
     return state_mag_noisy
 
 def measure_allZ(
-        q_device, shots: int=0, postselect_cond: dict[int, int]=None, training: bool=False
+        q_device, shots: int=0, postselect_cond: dict[int, int]={}, training: bool=False
 ):
     states, groupings  = q_device.noncanonical_states
     sharded_wires = torch.nonzero(groupings[1] == -2).flatten()
@@ -76,13 +83,39 @@ def measure_allZ(
     state_mag = (states ** 2).sum(-1)  # PauliZ hardocded here; no rotation before grabbing probabilities
 
     # postselect_cond dictionary determines whether to ignore slices of state_mag (i.e. {0: 1} indicates wire zero should be |1>)
-    if postselect_cond is not None:
-        local_mask = torch.ones(q_device.to_local().size(), device=q_device.device)
-        full_mask = DTensor.from_local(local_mask, device_mesh=q_device.device_mesh, placements=q_device.placements)
-        post_wires, post_bits = [list(item) for item in postselect_cond.items()]
+    if postselect_cond:
+        assert set(postselect_cond.values()).issubset({0,1})
+        local_mask_size = maybe_to_local(state_mag).size()
+        local_mask_size = [local_mask_size[i] if i > 0 else 1 for i in range(len(local_mask_size))]
+        local_mask = torch.ones(local_mask_size, device=states.device, dtype=bool)
+        states_device_mesh, states_placements = maybe_get_dtensor_info(states)
+        post_wires = list(postselect_cond.keys())
+        post_bits = list(postselect_cond.values())
         post_groups = groupings[:, post_wires]
-        # TODO: Build Postselection mask
+        for i in range(len(post_wires)):
+            wire_info = post_groups[:, i].flatten()
+            if wire_info[1].item() in [-1, -2]: # Ungrouped/sharded qubits are easiest to handle
+                slice_idx = (slice(None), )*wire_info[0].item() + (1 - post_bits[i], ) + (slice(None), )*(len(local_mask_size) - wire_info[0].item() - 1)
+            else: # Grouped qubits require more delicate manipulation of the statevector
+                group_size = state_mag.shape[wire_info[0].item()]
+                group_bool = torch.zeros(group_size, device=local_mask.device, dtype=bool).reshape((2,)*int(np.log(group_size)/np.log(2)))
+                # For correct relative dimension, set nonselected dimension to False
+                group_bool[(slice(None), )*wire_info[1].item() + (1 - post_bits[i], ) + (slice(None), )*(group_size - wire_info[1].item() - 1)] = True
+                slice_idx = (slice(None), )*wire_info[0].item() + (group_bool.flatten(), ) + (slice(None), )*(len(local_mask_size) - wire_info[0].item() - 1)
+            local_mask[slice_idx] = False
 
+        full_mask = maybe_from_local(local_mask, device_mesh=states_device_mesh, placements=states_placements)
+        expanded_mask = full_mask.expand((local_mask_size[0], ) + (-1, ) * (full_mask.ndim - 1))
+        state_mag = torch.where(full_mask, state_mag, torch.zeros_like(state_mag))
+        norm_square = state_mag.sum([d for d in range(full_mask.ndim) if d > 0]).reshape(-1, 1)
+        retained = (norm_square.squeeze(-1) > 1e-16)
+        if not torch.any(retained):
+            raise RuntimeError('Postselection did not retain any batch elements.')
+        elif not torch.all(retained):
+            state_mag = state_mag[retained]
+            norm_square = norm_square[retained]
+        state_mag = state_mag/norm_square
+    
     if shots > 0:
         if not training:
             torch.manual_seed(q_device.shared_seed)
@@ -108,8 +141,7 @@ def measure_allZ(
             prob_ = shard_reduced_state_mag.sum(reduce_list)
         else:
             prob_ = shard_reduced_state_mag
-        if q_device.world_sz > 1:
-            prob_ = prob_.full_tensor()
+        prob_ = maybe_full_tensor(prob_)
         probs[:,wire,:] = prob_
 
     # pick ungrouped wire to interchange with all grouped wires
@@ -125,7 +157,7 @@ def measure_allZ(
         prev_wire = wire
 
     # Then reduce unsharded dimensions and calculate probs for sharded qubits
-    if q_device.log2_devices > 0:
+    if is_dtensor(state_mag_noisy):
         remaining_dims = torch.arange(1, state_mag_noisy.ndim, device=state_mag_noisy.device)
         unshard_mask = torch.ones(remaining_dims.shape, dtype=bool, device=remaining_dims.device)
         for wire in sharded_wires:
@@ -146,4 +178,9 @@ def measure_allZ(
 
     y = probs @ torch.tensor([1., -1.], device=probs.device)  # hardcoded PauliZ
 
-    return y  # (b, q)
+    # return y, retained if postselect_cond else y # (b, q)
+    if postselect_cond:
+        result = (y, retained)
+    else:
+        result = (y)
+    return result # (b, q)
