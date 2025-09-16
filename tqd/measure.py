@@ -75,6 +75,9 @@ def sampler_nondiff_exact(
 def measure_allZ(
         q_device, shots: int=0, postselect_cond: dict[int, int]={}, training: bool=False
 ):
+    if not len(postselect_cond) < q_device.n_wires - q_device.log2_devices:
+        raise RuntimeError('Postselected qubits exceeds number of available unsharded slots.')
+    q_device.maybe_reshard(list(postselect_cond.keys()))
     states, groupings  = q_device.noncanonical_states
     sharded_wires = torch.nonzero(groupings[1] == -2).flatten()
     grouped_wires = torch.nonzero(groupings[1] >= 0).flatten()
@@ -84,7 +87,8 @@ def measure_allZ(
 
     # postselect_cond dictionary determines whether to ignore slices of state_mag (i.e. {0: 1} indicates wire zero should be |1>)
     if postselect_cond:
-        assert set(postselect_cond.values()).issubset({0,1})
+        if not set(postselect_cond.values()).issubset({0,1}):
+            raise RuntimeError('Postselection criteria are ill-defined.')
         local_mask_size = maybe_to_local(state_mag).size()
         local_mask_size = [local_mask_size[i] if i > 0 else 1 for i in range(len(local_mask_size))]
         local_mask = torch.ones(local_mask_size, device=states.device, dtype=bool)
@@ -94,7 +98,7 @@ def measure_allZ(
         post_groups = groupings[:, post_wires]
         for i in range(len(post_wires)):
             wire_info = post_groups[:, i].flatten()
-            if wire_info[1].item() in [-1, -2]: # Ungrouped/sharded qubits are easiest to handle
+            if wire_info[1].item() == -1: # Ungrouped/sharded qubits are easiest to handle
                 slice_idx = (slice(None), )*wire_info[0].item() + (1 - post_bits[i], ) + (slice(None), )*(len(local_mask_size) - wire_info[0].item() - 1)
             else: # Grouped qubits require more delicate manipulation of the statevector
                 group_size = state_mag.shape[wire_info[0].item()]

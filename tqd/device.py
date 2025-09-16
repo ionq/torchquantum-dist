@@ -207,7 +207,7 @@ class DistributedQuantumDevice:
         Returns:
             None
         """
-        if self.world_sz <= 1:
+        if self.world_sz <= 1 or not wires:
             return
         cur_sharded_qubits = set(torch.nonzero(self._groupings[1] == -2).flatten().tolist())
         overlap = set(wires) & cur_sharded_qubits
