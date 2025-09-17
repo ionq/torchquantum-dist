@@ -2,6 +2,8 @@ import argparse
 import os
 
 import torch
+from torch.profiler import profile, ProfilerActivity, record_function
+from torch.utils.viz._cycles import warn_tensor_cycles
 
 import tqd
 import tqd.module
@@ -21,9 +23,11 @@ def scaling(batch, nq, world_sz):
         {'func': 'ry', 'wires': [i], 'input_idx': [i]} for i in range(nq)
     ]
     enc = tqd.GeneralEncoder(func_list)
-    base_mod = [enc] + \
-        [tqd.CX(wires=[i, (i+1) % nq]) for i in range(nq)] + \
-        [tqd.RY(wires=[i]) for i in range(nq)]
+    base_mod = [enc]
+    for _ in range(3):
+        base_mod = base_mod + \
+            [tqd.CX(wires=[i, (i+1) % nq]) for i in range(nq)] + \
+            [tqd.RY(wires=[i]) for i in range(nq)]
     mod = tqd.module.InvertibleUnitary(base_mod)
     mod.train()
     
@@ -39,7 +43,7 @@ def scaling(batch, nq, world_sz):
 
     opt = torch.optim.Adam([x_i])
     loss_s = []
-    for i in range(5):
+    for i in range(100):
 
         opt.zero_grad()
         out_i = fun(qdev, x_i)
@@ -48,6 +52,8 @@ def scaling(batch, nq, world_sz):
         loss_s.append(loss.item())
         loss.backward()
         opt.step()
+        if rank == '0':
+            print(i+1)
     #print(loss_s)
 
 
@@ -62,4 +68,6 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    warn_tensor_cycles()
+    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True, profile_memory=True) as prof:
     scaling(args.batch, args.nq, args.world_sz)
