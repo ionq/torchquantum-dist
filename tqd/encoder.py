@@ -23,3 +23,6 @@ class GeneralEncoder(torch.nn.Module):
             else:
                 params = None
             getattr(functional, f"{name}_inv")(q_dev, info['wires'], params=params)
+
+def AmplitudeEncoder(q_dev, amplitudes):
+    q_dev.load_amplitudes(amplitudes)

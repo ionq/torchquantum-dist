@@ -1,7 +1,7 @@
 from typing import Union, Optional
 
 import torch
-from torch.distributed.tensor import DTensor, DeviceMesh, Shard
+from torch.distributed.tensor import DTensor, DeviceMesh, Shard, distribute_tensor
 
 
 # Small helper subroutines for performing basic DTensor operations if necessary, leaves tensors alone otherwise 
@@ -20,3 +20,6 @@ def maybe_from_local(tensor: Union[torch.Tensor, DTensor], device_mesh: Optional
 
 def maybe_full_tensor(tensor: Union[torch.Tensor, DTensor]) -> torch.Tensor:
     return tensor.full_tensor() if isinstance(tensor, DTensor) else tensor
+
+def maybe_distribute_tensor(tensor: Union[torch.Tensor, DTensor], device_mesh: Optional[DeviceMesh] = None, placements: tuple[Shard] = ()) -> Union[torch.Tensor, DTensor]:
+    return distribute_tensor(tensor, device_mesh=device_mesh, placements=placements) if device_mesh and placements else tensor

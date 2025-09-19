@@ -42,8 +42,8 @@ def test_groupings(verbose = False):
         print(f'after rz {rank} {qdev.states}')
 
     # test registration
-    tqd.custom.register_gate('i', torch.eye(2, dtype=torch.cfloat))
-    tqd.custom.i(qdev, wires=[1])
+    tqd.custom.register_gate('id', torch.eye(2, dtype=torch.cfloat))
+    tqd.custom.id(qdev, wires=[1])
 
     if verbose:
         print(f'after {rank} {qdev.states}')
@@ -344,8 +344,8 @@ def test_dqd(verbose=False):
         print(f'after rz {rank} {qdev.states}')
 
     # test registration
-    tqd.custom.register_gate('i', torch.eye(2, dtype=torch.cfloat))
-    tqd.custom.i(qdev, wires=[1])
+    tqd.custom.register_gate('id', torch.eye(2, dtype=torch.cfloat))
+    tqd.custom.id(qdev, wires=[1])
 
     if verbose:
         print(f'after {rank} {qdev.states}')

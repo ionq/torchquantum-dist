@@ -10,6 +10,7 @@ from torch.distributed.tensor import DTensor, Replicate, Shard
 
 from . import functional, matrices
 from .utils.interchange import interchange_qubits
+from .utils.maybe_dtensor import maybe_distribute_tensor, maybe_get_dtensor_info
 
 
 class DistributedQuantumDevice:
@@ -39,7 +40,6 @@ class DistributedQuantumDevice:
         # from left to right: qubit 0 to n
         self.n_wires = n_wires
         self.device_name = device_name + "_distributed"
-        self.bsz = bsz
         self.device = device
         self.shared_seed = shared_seed
 
@@ -73,7 +73,7 @@ class DistributedQuantumDevice:
         self._groupings = torch.zeros((2, self.n_wires), dtype=torch.int)
         # use 1st dim for batching, last dim for real/imag
         if self.n_wires < max_dtensor_dims - 2:
-            self.local_shape = (bsz, ) + (2, ) * (self.n_wires - self.log2_devices) + (1, ) * self.log2_devices + (2, )
+            self.local_shape = (1, ) + (2, ) * (self.n_wires - self.log2_devices) + (1, ) * self.log2_devices + (2, )
             self._groupings[0] = torch.arange(self.n_wires) + 1 # Each qubit is own group
             self._groupings[1] = -1
             if self.log2_devices > 0:
@@ -85,7 +85,7 @@ class DistributedQuantumDevice:
             num_grouped_qubits = self.n_wires - self.log2_devices - 2
 
             group_nums = [num_grouped_qubits//num_grouped_dims + int(i < num_grouped_qubits%num_grouped_dims) for i in range(num_grouped_dims)]
-            self.local_shape = (bsz, ) + (2, ) + tuple([2**qubits for qubits in group_nums]) + (2, ) + (1, ) * self.log2_devices + (2, )
+            self.local_shape = (1, ) + (2, ) + tuple([2**qubits for qubits in group_nums]) + (2, ) + (1, ) * self.log2_devices + (2, )
 
             # Arrange groupings according to grouped_dimensions
             # First and last groupings always contain only 1 qubit
@@ -107,9 +107,12 @@ class DistributedQuantumDevice:
         
         self.last_unsharded = qubit_idx # last unsharded group always contains one qubit
         self.num_dims = max_dtensor_dims
-        self.reset_states()
+        self.reset_states(bsz)
 
-    def reset_states(self):
+    def reset_states(self, bsz=None):
+        if bsz:
+            self.local_shape = tuple([self.local_shape[i] if i > 0 else bsz for i in range(len(self.local_shape))])
+            self.bsz = bsz
         # shard along designated initial wires
         sharded_wires = (self._groupings[:,(self._groupings[1] == -2)][0]).tolist()
         self._states = torch.zeros(self.local_shape, device=self.device)
@@ -130,6 +133,15 @@ class DistributedQuantumDevice:
                 self._invertible_dummy = self._invertible_dummy.expand_as(self._states)
         else:
             self._invertible_dummy = None
+
+    def load_amplitudes(self, amplitudes):
+        self.reset_states(bsz=amplitudes.shape[0])
+        if amplitudes.is_complex():
+            loading = torch.view_as_real(amplitudes).to(self.device)
+        else:
+            loading = torch.stack((amplitudes, torch.zeros_like(amplitudes)), dim=-1).to(self.device)
+        maybe_mesh, maybe_placements = maybe_get_dtensor_info(self._states)
+        self._states = maybe_distribute_tensor(loading.reshape(self._states.shape), device_mesh=maybe_mesh, placements=maybe_placements)
 
     @property
     def noncanonical_states(self) -> [Union[DTensor, torch.Tensor], torch.Tensor]:
