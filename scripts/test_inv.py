@@ -29,7 +29,7 @@ def test_inv(verbose=False):
     )
 
     # test registration
-    tqd.custom.register_gate('i', torch.eye(2, dtype=torch.cfloat))
+    tqd.custom.register_gate('id', torch.eye(2, dtype=torch.cfloat))
     
     def fun(qdev, inp):
         func_list = [
@@ -38,7 +38,7 @@ def test_inv(verbose=False):
             {'func': 'ry', 'wires': [2], 'input_idx': [2]},
         ]
         enc = tqd.GeneralEncoder(func_list)
-        base_mod = [enc] + [tqd.CX(wires=[i, (i+1) % nq]) for i in range(qdev.n_wires)] + [tqd.custom.I(wires=[1])]
+        base_mod = [enc] + [tqd.CX(wires=[i, (i+1) % nq]) for i in range(qdev.n_wires)] + [tqd.custom.ID(wires=[1])]
         if qdev.invertible:
             mod = tqd.module.InvertibleUnitary(base_mod)
             mod.train()
