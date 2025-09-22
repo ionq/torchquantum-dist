@@ -133,7 +133,14 @@ def gate(
     name, q_device, wires,
     params=None, inverse=False
 ):
-    mat = GATE_MAT_DICT[name]
+    if isinstance(name, str):
+        mat = GATE_MAT_DICT[name]
+    elif isinstance(name, torch.Tensor):
+        if not (name.ndim == 2 and name.shape[0] == name.shape[1] and name.shape[0] == 2**len(wires)):
+            raise ValueError ('Invalid gate matrix provided')
+        mat = name
+    else:
+        raise TypeError('Invalid gate type provided.')
     if params is not None:
         if not isinstance(params, torch.Tensor):
             # this is for directly inputting parameters as a number
