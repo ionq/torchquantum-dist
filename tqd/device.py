@@ -140,8 +140,10 @@ class DistributedQuantumDevice:
             loading = torch.view_as_real(amplitudes).to(self.device)
         else:
             loading = torch.stack((amplitudes, torch.zeros_like(amplitudes)), dim=-1).to(self.device)
+        norms = torch.sqrt((loading**2).sum([i+1 for i in range(norms.ndim-1)])).reshape((-1, ) + (1, )*(loading.ndim - 1))
+
         maybe_mesh, maybe_placements = maybe_get_dtensor_info(self._states)
-        self._states = maybe_distribute_tensor(loading.reshape(self._states.shape), device_mesh=maybe_mesh, placements=maybe_placements)
+        self._states = maybe_distribute_tensor((loading/norms).reshape(self._states.shape), device_mesh=maybe_mesh, placements=maybe_placements)
 
     @property
     def noncanonical_states(self) -> [Union[DTensor, torch.Tensor], torch.Tensor]:
