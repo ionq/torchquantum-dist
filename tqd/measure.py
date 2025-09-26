@@ -118,6 +118,7 @@ def measure_allZ(
         elif not torch.all(retained):
             state_mag = state_mag[retained]
             norm_square = norm_square[retained]
+        norm_square = norm_square.reshape(norm_square.shape[0], *([1] * (state_mag.ndim - 1))) 
         state_mag = state_mag/norm_square
     
     if shots > 0:
