@@ -130,15 +130,19 @@ def apply_unitary_bmm(
     return new_state, new_grouping, invertible_dummy
 
 def gate(
-    name, q_device, wires,
-    params=None, inverse=False
+        name_or_mat: Union[str, torch.Tensor], q_device, wires,
+        params=None, inverse=False
 ):
-    if isinstance(name, str):
-        mat = GATE_MAT_DICT[name]
-    elif isinstance(name, torch.Tensor):
-        if not (name.ndim == 2 and name.shape[0] == name.shape[1] and name.shape[0] == 2**len(wires)):
+    '''
+    Gate operation accepts either a known gate name and retrieves the corresponding matrix, or directly accepts an unnamed gate matrix.
+    Automatically checks unnamed gate matrices for sizing but does NOT check for unitarity.
+    '''
+    if isinstance(name_or_mat, str):
+        mat = GATE_MAT_DICT[name_or_mat]
+    elif isinstance(name_or_mat, torch.Tensor):
+        if not (name_or_mat.ndim == 2 and name_or_mat.shape[0] == name_or_mat.shape[1] and name_or_mat.shape[0] == 2**len(wires)):
             raise ValueError ('Invalid gate matrix provided')
-        mat = name
+        mat = name_or_mat
     else:
         raise TypeError('Invalid gate type provided.')
     if params is not None:
@@ -155,7 +159,7 @@ def gate(
     if q_device.record_op:
         q_device.op_history.append(
             {
-                "name": name,  # type: ignore
+                "name_or_mat": name_or_mat,  # type: ignore
                 "wires": np.array(wires).squeeze().tolist(),
                 "params": params.squeeze().detach().cpu().numpy().tolist()
                 if params is not None
