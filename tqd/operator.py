@@ -4,7 +4,7 @@ from . import functional, matrices
 
 # Base class for Operator
 class Op(torch.nn.Module):
-    def __init__(self, func, func_inv, wires, has_params=True, trainable=True, **unused):
+    def __init__(self, func, func_inv, wires, has_params=True, trainable=True, init_scale=1, **unused):
         super().__init__()
         self.func_ = func
         self.func_inv_ = func_inv
@@ -13,7 +13,7 @@ class Op(torch.nn.Module):
         self.trainable = trainable
         self.params = None
         if has_params:
-            self.params = torch.empty(1)
+            self.params = init_scale*(torch.rand(1) - 0.5)
             if trainable:
                 self.params = torch.nn.Parameter(self.params)
 

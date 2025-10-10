@@ -7,12 +7,8 @@ from torch.autograd import Function, backward
 from torch.distributed.tensor import DTensor
 
 from .matrices import GATE_MAT_DICT
-
-def maybe_to_local(tensor: torch.Tensor | DTensor) -> torch.Tensor | DTensor:
-    """
-    calls `.to_local()` if `tensor` is a `DTensor`, otherwise leaves it alone
-    """
-    return tensor.to_local() if isinstance(tensor, DTensor) else tensor
+from .utils.interchange import interchange_qubits, interchange_dims
+from .utils.maybe_dtensor import maybe_to_local, maybe_get_dtensor_info, maybe_from_local
 
 class InvertibleUnitaryBMM(Function):
     """
@@ -57,7 +53,7 @@ class InvertiblePostUnitaryStep(Function):
 
 def apply_unitary_bmm(
     state: Union[DTensor, torch.Tensor], mat: torch.Tensor,
-    wires: Union[int, list[int]], wire_order: list[int],
+    wires: Union[int, list[int]], grouping: torch.Tensor,
     invertible_dummy: Union[DTensor, torch.Tensor]=None
 ):
     """
@@ -68,6 +64,7 @@ def apply_unitary_bmm(
         state (DTensor or torch.Tensor): The batched statevectors as a real DTensor. in last dim, 0th index is real part, 1st index is imaginary part
         mat (torch.Tensor): The batched unitary matrix of the operation as a complex Tensor.
         wires (int or List[int]): Which qubit(s) the operation is applied to.
+        grouping: a grouping tensor indicating the positions of all wires inside state
         invertible_dummy (DTensor or torch.Tensor): use invertible computation to save memory? if yes, needs to be a dummy tensor to store gradients. if no, use None
 
     Returns:
@@ -75,31 +72,34 @@ def apply_unitary_bmm(
 
     """
     mat = mat.to(state.device)
-    gate_dims = [w + 1 for w in wires]
+    if isinstance(wires, int):
+        wires = [wires]
 
-    pre = []
-    post = []
-    for gd_ in gate_dims:
-        # order matters, so we search thru `gate_dims` in order
-        pre.append(1 + wire_order.index(gd_ - 1))
-    for i, w in enumerate(wire_order):
-        if w + 1 not in gate_dims:
-            #order doesn't matter
-            post.append(i+1)
-    permute_to = pre + post
-    new_wire_order = [wire_order[d - 1] for d in permute_to]
-    permute_to = [0] + permute_to + [state.dim()-1]
-    orig_local_shape = maybe_to_local(state).shape
-    permuted_local_shape = [orig_local_shape[i] for i in permute_to]
-    bsz = orig_local_shape[0]
-    permuted = state.permute(permute_to)
-    is_dtensor = isinstance(state, DTensor)
-    if is_dtensor:
-        perm_dm, perm_place = permuted.device_mesh, permuted.placements
-    permuted = torch.view_as_complex(maybe_to_local(permuted)).reshape([bsz, 2 ** len(wires), -1])
+    # First ensure wires are ungrouped
+    eligible_ungroups = list(set(torch.nonzero(grouping[1] ==-1 ).flatten().tolist()) - set(wires))
+    for wire in wires:
+        if grouping[1,wire] > -1:
+            ungroup = eligible_ungroups.pop(0)
+            if invertible_dummy is not None:
+                invertible_dummy,_ = interchange_qubits(invertible_dummy, grouping, wire, ungroup)
+            state, grouping = interchange_qubits(state, grouping, wire, ungroup)
+
+    num_dims = state.ndim
+    wire_dims = grouping[0,wires].tolist()
+    # Move wire dimensions into first qubit dimensions
+    for i in range(len(wires)):
+        current_dim = grouping[0,wires[i]].item()
+        if current_dim != i+1:
+            if invertible_dummy is not None:
+                invertible_dummy,_ = interchange_dims(invertible_dummy, grouping, current_dim, i+1, num_dims)
+            state, grouping = interchange_dims(state, grouping, current_dim, i+1, num_dims)
+
+    local_shape = maybe_to_local(state).shape
+    bsz = local_shape[0]
+    dtensor_mesh, dtensor_placements = maybe_get_dtensor_info(state)
     if invertible_dummy is not None:
-        invertible_dummy = invertible_dummy.permute(permute_to)
-        invertible_dummy = torch.view_as_complex(maybe_to_local(invertible_dummy).contiguous()).reshape([bsz, 2 ** len(wires), -1])
+        invertible_dummy = torch.view_as_complex(maybe_to_local(invertible_dummy).contiguous()).reshape([bsz, 2**len(wires), -1])
+    permuted = torch.view_as_complex(maybe_to_local(state)).reshape([bsz, 2**len(wires), -1])
     
     #permuted (b, m, k)
     #mat ([b,] n, m)
@@ -114,22 +114,37 @@ def apply_unitary_bmm(
         new_state = mat.bmm(permuted)
 
     new_state, invertible_dummy = [
-        x if x is None else torch.view_as_real(x).view(permuted_local_shape)
+        x if x is None else maybe_from_local(torch.view_as_real(x).reshape(local_shape), device_mesh=dtensor_mesh, placements=dtensor_placements)
         for x in (new_state, invertible_dummy)
     ]
-    if is_dtensor:
-        new_state, invertible_dummy = [
-            x if x is None else DTensor.from_local(x, device_mesh=perm_dm, placements=perm_place)
-            for x in (new_state, invertible_dummy)
-        ]
-    
-    return new_state, new_wire_order, invertible_dummy
+
+    new_grouping = grouping
+    # Rearrange dims back in place
+    for i in range(len(wires)):
+        current_dim = grouping[0,wires[i]].item()
+        if current_dim != wire_dims[i]:
+            if invertible_dummy is not None:
+                invertible_dummy,_ = interchange_dims(invertible_dummy, grouping, wire_dims[i], current_dim, num_dims)
+            new_state, new_grouping = interchange_dims(new_state, new_grouping, wire_dims[i], current_dim, num_dims)
+
+    return new_state, new_grouping, invertible_dummy
 
 def gate(
-    name, q_device, wires,
-    params=None, inverse=False
+        name_or_mat: Union[str, torch.Tensor], q_device, wires,
+        params=None, inverse=False
 ):
-    mat = GATE_MAT_DICT[name]
+    '''
+    Gate operation accepts either a known gate name and retrieves the corresponding matrix, or directly accepts an unnamed gate matrix.
+    Automatically checks unnamed gate matrices for sizing but does NOT check for unitarity.
+    '''
+    if isinstance(name_or_mat, str):
+        mat = GATE_MAT_DICT[name_or_mat]
+    elif isinstance(name_or_mat, torch.Tensor):
+        if not (name_or_mat.ndim == 2 and name_or_mat.shape[0] == name_or_mat.shape[1] and name_or_mat.shape[0] == 2**len(wires)):
+            raise ValueError ('Invalid gate matrix provided')
+        mat = name_or_mat
+    else:
+        raise TypeError('Invalid gate type provided.')
     if params is not None:
         if not isinstance(params, torch.Tensor):
             # this is for directly inputting parameters as a number
@@ -144,7 +159,7 @@ def gate(
     if q_device.record_op:
         q_device.op_history.append(
             {
-                "name": name,  # type: ignore
+                "name_or_mat": name_or_mat,  # type: ignore
                 "wires": np.array(wires).squeeze().tolist(),
                 "params": params.squeeze().detach().cpu().numpy().tolist()
                 if params is not None
@@ -167,13 +182,12 @@ def gate(
     # handle resharding here so that applying unitary on the state operates in parallel
     q_device.maybe_reshard(wires)
 
-    state = q_device._states
-    wire_order = q_device._wire_order
+    state, grouping = q_device.noncanonical_states
     func = apply_unitary_bmm
 
-    state, wire_order, invertible_dummy = func(state, matrix, wires, wire_order, invertible_dummy=q_device._invertible_dummy)
+    state, grouping, invertible_dummy = func(state, matrix, wires, grouping, invertible_dummy=q_device._invertible_dummy)
     q_device._states = state
-    q_device._wire_order = wire_order
+    q_device._groupings = grouping
     q_device._invertible_dummy = invertible_dummy
 
 # populate namespace with functionals

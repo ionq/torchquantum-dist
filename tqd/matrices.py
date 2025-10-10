@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 # batches are shape (b, 1)
 def rx_mat(params: torch.Tensor) -> torch.Tensor:
@@ -29,6 +30,10 @@ GATE_MAT_DICT = {
     'x': torch.tensor([[0, 1], [1, 0]], dtype=torch.complex64),
     'y': torch.tensor([[0, -1j], [1j, 0]], dtype=torch.complex64),
     'z': torch.tensor([[1, 0], [0, -1]], dtype=torch.complex64),
+    'i': torch.tensor([[1, 0], [0, 1]], dtype=torch.complex64),
+    'h': torch.tensor([[1, 1], [1, -1]], dtype=torch.complex64)/np.sqrt(2),
+    's': torch.tensor([[1, 0], [0, 1j]], dtype=torch.complex64),
+    't': torch.tensor([[1, 0], [0, np.cos(np.pi/4) + np.sin(np.pi/4)*1j]], dtype=torch.complex64),
     'cx': torch.tensor(
         [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 1], [0, 0, 1, 0]], dtype=torch.complex64
     ),
@@ -37,6 +42,9 @@ GATE_MAT_DICT = {
     ),
     'cz': torch.tensor(
         [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, -1]], dtype=torch.complex64
+    ),
+    'swap': torch.tensor(
+        [[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]], dtype=torch.complex64
     ),
     'rx': rx_mat,
     'ry': ry_mat,
