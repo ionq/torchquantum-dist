@@ -63,7 +63,7 @@ The InvertibleUnitary object contains basic functionality for depolarizing noise
 
 ## Citation
 ```bash
-@inproceedings{knitter2024tqd,
+@inproceedings{knitter2025tqd,
       title = {TorchQuantumDistributed},
       author = {Knitter, Oliver and Mei, Jonathan and Yamada, Masako and Roetteler, Martin},
       booktitle = {NeurIPS Workshop on AI for Science: The Reach and Limits of AI for Scientific Discovery},
