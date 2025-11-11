@@ -1,5 +1,5 @@
 # Torch Multi-GPU statevector support
-Minimized extension of `torchquantum` (henceforth `tq`) to allow multi-GPU distributed statevector using `DTensor` from `torch.distributed`. Does _not_ depend on `tq`.
+Minimized extension of [`torchquantum`](https://github.com/mit-han-lab/torchquantum) (henceforth `tq`) to allow multi-GPU distributed statevector using `DTensor` from `torch.distributed`. Basic structure is inspired by `tq` but this is a full reimplementation that does _not_ require `tq` as a dependency.
 
 `tqd` provides:
   - `DistributedQuantumDevice`, similar to `QuantumDevice`, but allowing statevector to be distributed across multiple GPUS
@@ -59,10 +59,14 @@ To add custom gates without modifying the library, use the `tqd.custom.register_
 
 To further extend the gate set, simply create a new entry in `tqd.matrices.GATE_MAT_DICT`. Functionals and Operators automatically get created from this dictionary.
 
-### TODOs
- - [x] Handle resharding when computations cross devices
- - [x] Less permuting
- - [x] Reintroduce batching
- - [ ] Activation checkpointing (invertible computations)
- - [ ] Gate noise model
- - [ ] Fancy gates
+The InvertibleUnitary object contains basic functionality for depolarizing noise modeling as well.
+
+## Citation
+```bash
+@inproceedings{knitter2024tqd,
+      title = {TorchQuantumDistributed},
+      author = {Knitter, Oliver and Mei, Jonathan and Yamada, Masako and Roetteler, Martin},
+      booktitle = {NeurIPS Workshop on AI for Science: The Reach and Limits of AI for Scientific Discovery},
+      year = {2025}
+}
+```
