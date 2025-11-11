@@ -62,7 +62,7 @@ To further extend the gate set, simply create a new entry in `tqd.matrices.GATE_
 The InvertibleUnitary object contains basic functionality for depolarizing noise modeling as well.
 
 ## Citation
-```bash
+```
 @inproceedings{knitter2025tqd,
       title = {TorchQuantumDistributed},
       author = {Knitter, Oliver and Mei, Jonathan and Yamada, Masako and Roetteler, Martin},
