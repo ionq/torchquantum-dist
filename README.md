@@ -59,7 +59,8 @@ To add custom gates without modifying the library, use the `tqd.custom.register_
 
 To further extend the gate set, simply create a new entry in `tqd.matrices.GATE_MAT_DICT`. Functionals and Operators automatically get created from this dictionary.
 
-The InvertibleUnitary object contains basic functionality for depolarizing noise modeling as well.
+The `InvertibleUnitary` fundamental module contains basic functionality for depolarizing noise modeling.
+The `measure_allZ` measurement function also contains basic functionality to perform postselection at the time of measurement.
 
 ## Citation
 ```
