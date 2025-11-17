@@ -1,4 +1,3 @@
-
 from . import custom, functional, module, operator
 from .device import DistributedQuantumDevice
 from .encoder import GeneralEncoder

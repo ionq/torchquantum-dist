@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from . import functional, matrices, operator
 
+
 def register_gate(name, mat):
     name = name.lower()
     if name not in matrices.GATE_MAT_DICT:
