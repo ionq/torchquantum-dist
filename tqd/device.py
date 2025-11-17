@@ -1,6 +1,6 @@
 import os
 from functools import partialmethod
-from typing import Union
+from typing import Any, Union
 
 import numpy as np
 import torch
@@ -44,7 +44,7 @@ class DistributedQuantumDevice:
         self.shared_seed = shared_seed
 
         self.record_op = record_op
-        self.op_history = []
+        self.op_history: list[dict[str, Any]] = []
         self.invertible = invertible
 
         # Bind interchange function
@@ -181,9 +181,9 @@ class DistributedQuantumDevice:
             loading = torch.stack(
                 (amplitudes, torch.zeros_like(amplitudes)), dim=-1
             ).to(self.device)
-        norms = torch.sqrt(
-            (loading**2).sum([i + 1 for i in range(norms.ndim - 1)])
-        ).reshape((-1,) + (1,) * (loading.ndim - 1))
+        norms = torch.sqrt((loading**2).sum(dim=tuple(range(1, loading.ndim)))).reshape(
+            (-1,) + (1,) * (loading.ndim - 1)
+        )
 
         maybe_mesh, maybe_placements = maybe_get_dtensor_info(self._states)
         self._states = maybe_distribute_tensor(
@@ -193,7 +193,7 @@ class DistributedQuantumDevice:
         )
 
     @property
-    def noncanonical_states(self) -> [Union[DTensor, torch.Tensor], torch.Tensor]:
+    def noncanonical_states(self) -> tuple[Union[DTensor, torch.Tensor], torch.Tensor]:
         """
         Obtain device states and groupings without canonicalization (used for measurements)
         The groupings are detached and cloned to prevent interference but the states are not to avoid unnecessary computations.

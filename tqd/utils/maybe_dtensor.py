@@ -1,4 +1,4 @@
-from typing import Union, Optional
+from typing import Optional, Union
 
 import torch
 from torch.distributed.tensor import DTensor, DeviceMesh, Shard, distribute_tensor
@@ -19,19 +19,18 @@ def maybe_to_local(
 
 def maybe_get_dtensor_info(
     tensor: Union[torch.Tensor, DTensor],
-) -> (Optional[DeviceMesh], tuple[Shard]):
-    return (
-        (tensor.device_mesh, tensor.placements)
-        if isinstance(tensor, DTensor)
-        else (None, ())
-    )
+) -> tuple[Optional[DeviceMesh], tuple[Shard, ...]]:
+    if isinstance(tensor, DTensor):
+        return tensor.device_mesh, tuple(tensor.placements)
+    return None, ()
 
 
 def maybe_from_local(
     tensor: Union[torch.Tensor, DTensor],
     device_mesh: Optional[DeviceMesh] = None,
-    placements: tuple[Shard] = (),
+    placements: Optional[tuple[Shard, ...]] = None,
 ) -> Union[torch.Tensor, DTensor]:
+    placements = placements or ()
     return (
         DTensor.from_local(tensor, device_mesh=device_mesh, placements=placements)
         if device_mesh and placements
@@ -46,8 +45,9 @@ def maybe_full_tensor(tensor: Union[torch.Tensor, DTensor]) -> torch.Tensor:
 def maybe_distribute_tensor(
     tensor: Union[torch.Tensor, DTensor],
     device_mesh: Optional[DeviceMesh] = None,
-    placements: tuple[Shard] = (),
+    placements: Optional[tuple[Shard, ...]] = None,
 ) -> Union[torch.Tensor, DTensor]:
+    placements = placements or ()
     return (
         distribute_tensor(tensor, device_mesh=device_mesh, placements=placements)
         if device_mesh and placements

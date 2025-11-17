@@ -250,10 +250,10 @@ def test_groupings(verbose=False):
     )
 
     # test noisy non-differentiable (sampling) measurement
-    meas_samp = tqd.measure_allZ(qdev, shots=int(1e5), training=False)
+    meas_samp = tqd.measure_allZ(qdev, shots=int(1e5), training=False)  # noqa: F841
 
     # test noisy differentiable (approximate) measurement
-    meas_approx = tqd.measure_allZ(qdev, shots=int(1e5), training=True)
+    meas_approx = tqd.measure_allZ(qdev, shots=int(1e5), training=True)  # noqa: F841
 
     if rank == "0":
         print("groupings test passed!")

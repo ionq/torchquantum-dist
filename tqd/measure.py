@@ -164,9 +164,6 @@ def measure_allZ(
         full_mask = maybe_from_local(
             local_mask, device_mesh=states_device_mesh, placements=states_placements
         )
-        expanded_mask = full_mask.expand(
-            (local_mask_size[0],) + (-1,) * (full_mask.ndim - 1)
-        )
         state_mag = torch.where(full_mask, state_mag, torch.zeros_like(state_mag))
         norm_square = state_mag.sum(
             [d for d in range(full_mask.ndim) if d > 0]
@@ -189,7 +186,10 @@ def measure_allZ(
         else:
             sampler = sampler_diff_approx
     else:  # no noise; identity w/ extra args
-        sampler = lambda x, _0, _1, _2: x
+
+        def sampler(x, _0, _1, _2):
+            return x
+
     state_mag_noisy = sampler(state_mag, shots, q_device.global_rank, q_device.world_sz)
 
     probs = torch.zeros(
