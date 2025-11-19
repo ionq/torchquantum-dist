@@ -1,12 +1,12 @@
 import os
 from functools import partialmethod
-from typing import Union
+from typing import Any, Union
 
 import numpy as np
 import torch
 import torch.distributed
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import DTensor, Replicate, Shard
+from torch.distributed.tensor import DTensor, Shard
 
 from . import functional, matrices
 from .utils.interchange import interchange_qubits
@@ -24,7 +24,7 @@ class DistributedQuantumDevice:
         world_sz: int = 1,
         shared_seed: int = 20740,
         invertible: bool = False,
-        max_dtensor_dims: int = 16
+        max_dtensor_dims: int = 16,
     ):
         """A quantum device that contains the quantum state vector.
         Args:
@@ -44,7 +44,7 @@ class DistributedQuantumDevice:
         self.shared_seed = shared_seed
 
         self.record_op = record_op
-        self.op_history = []
+        self.op_history: list[dict[str, Any]] = []
         self.invertible = invertible
 
         # Bind interchange function
@@ -53,81 +53,120 @@ class DistributedQuantumDevice:
         # set up distributed
         self.world_sz = world_sz
         if world_sz > 1:
-            local_rank = int(os.environ['LOCAL_RANK'])
-            global_rank = int(os.environ['RANK'])
+            local_rank = int(os.environ["LOCAL_RANK"])
+            global_rank = int(os.environ["RANK"])
         else:
             local_rank = 0
             global_rank = 0
         self.local_rank = local_rank
         self.global_rank = global_rank
-        if device =='cuda':
-            torch.cuda.set_device(f'cuda:{local_rank}')
+        if device == "cuda":
+            torch.cuda.set_device(f"cuda:{local_rank}")
         self.device_mesh = None
         self.log2_devices = int(np.ceil(np.log2(world_sz)))
         if world_sz > 1:
             if not torch.distributed.is_initialized():
-                torch.distributed.init_process_group(backend="nccl", init_method='env://', rank=global_rank, world_size=world_sz)
+                torch.distributed.init_process_group(
+                    backend="nccl",
+                    init_method="env://",
+                    rank=global_rank,
+                    world_size=world_sz,
+                )
             self.device_mesh = init_device_mesh(device, (2,) * self.log2_devices)
 
         # First row of self._groupings indicates group number, second row indicates relative position
         self._groupings = torch.zeros((2, self.n_wires), dtype=torch.int)
         # use 1st dim for batching, last dim for real/imag
         if self.n_wires < max_dtensor_dims - 2:
-            self.local_shape = (1, ) + (2, ) * (self.n_wires - self.log2_devices) + (1, ) * self.log2_devices + (2, )
-            self._groupings[0] = torch.arange(self.n_wires) + 1 # Each qubit is own group
+            self.local_shape = (
+                (1,)
+                + (2,) * (self.n_wires - self.log2_devices)
+                + (1,) * self.log2_devices
+                + (2,)
+            )
+            self._groupings[0] = (
+                torch.arange(self.n_wires) + 1
+            )  # Each qubit is own group
             self._groupings[1] = -1
             if self.log2_devices > 0:
-                self._groupings[1, -self.log2_devices:] = -2
+                self._groupings[1, -self.log2_devices :] = -2
             qubit_idx = self.n_wires - self.log2_devices
         else:
             # Number of possible dimensions for grouping equals total dimension number minus batching dim, real/imag dim, sharding dims, and two single-qubit dims
             num_grouped_dims = max_dtensor_dims - 4 - self.log2_devices
             num_grouped_qubits = self.n_wires - self.log2_devices - 2
 
-            group_nums = [num_grouped_qubits//num_grouped_dims + int(i < num_grouped_qubits%num_grouped_dims) for i in range(num_grouped_dims)]
-            self.local_shape = (1, ) + (2, ) + tuple([2**qubits for qubits in group_nums]) + (2, ) + (1, ) * self.log2_devices + (2, )
+            group_nums = [
+                num_grouped_qubits // num_grouped_dims
+                + int(i < num_grouped_qubits % num_grouped_dims)
+                for i in range(num_grouped_dims)
+            ]
+            self.local_shape = (
+                (1,)
+                + (2,)
+                + tuple([2**qubits for qubits in group_nums])
+                + (2,)
+                + (1,) * self.log2_devices
+                + (2,)
+            )
 
             # Arrange groupings according to grouped_dimensions
             # First and last groupings always contain only 1 qubit
             # Second row designation of -1 includes ungrouped qubit, -2 designations sharded qubit
-            self._groupings[:,0] = torch.Tensor([1,-1]).int()
+            self._groupings[:, 0] = torch.Tensor([1, -1]).int()
             qubit_idx = 1
             for i in range(len(group_nums)):
-                self._groupings[0,qubit_idx:qubit_idx + group_nums[i]] = i + 2
+                self._groupings[0, qubit_idx : qubit_idx + group_nums[i]] = i + 2
                 if group_nums[i] == 1:
                     self._groupings[1, qubit_idx] = -1
                 else:
-                    self._groupings[1,qubit_idx:qubit_idx + group_nums[i]] = torch.arange(group_nums[i])
+                    self._groupings[1, qubit_idx : qubit_idx + group_nums[i]] = (
+                        torch.arange(group_nums[i])
+                    )
                 qubit_idx += group_nums[i]
             # qubit_idx now indicates end of grouped qubits
-            self._groupings[0,qubit_idx] = len(group_nums) + 2
-            self._groupings[1,qubit_idx] = -1
-            self._groupings[0,qubit_idx + 1:] = len(group_nums) + 3 + torch.arange(self.log2_devices)
-            self._groupings[1,qubit_idx + 1:] = -2
-        
-        self.last_unsharded = qubit_idx # last unsharded group always contains one qubit
+            self._groupings[0, qubit_idx] = len(group_nums) + 2
+            self._groupings[1, qubit_idx] = -1
+            self._groupings[0, qubit_idx + 1 :] = (
+                len(group_nums) + 3 + torch.arange(self.log2_devices)
+            )
+            self._groupings[1, qubit_idx + 1 :] = -2
+
+        self.last_unsharded = (
+            qubit_idx  # last unsharded group always contains one qubit
+        )
         self.num_dims = max_dtensor_dims
         self.reset_states(bsz)
 
     def reset_states(self, bsz=None):
         if bsz:
-            self.local_shape = tuple([self.local_shape[i] if i > 0 else bsz for i in range(len(self.local_shape))])
+            self.local_shape = tuple(
+                [
+                    self.local_shape[i] if i > 0 else bsz
+                    for i in range(len(self.local_shape))
+                ]
+            )
             self.bsz = bsz
         # shard along designated initial wires
-        sharded_wires = (self._groupings[:,(self._groupings[1] == -2)][0]).tolist()
+        sharded_wires = (self._groupings[:, (self._groupings[1] == -2)][0]).tolist()
         self._states = torch.zeros(self.local_shape, device=self.device)
         if self.global_rank == 0:
-            self._states[(slice(None), ) + (0, ) * (self._states.ndim - 1)] = 1
+            self._states[(slice(None),) + (0,) * (self._states.ndim - 1)] = 1
         if self.world_sz > 1:
             placements = [Shard(i) for i in sharded_wires]
-            self._states = DTensor.from_local(self._states, self.device_mesh, placements)
+            self._states = DTensor.from_local(
+                self._states, self.device_mesh, placements
+            )
 
         if self.invertible:
-            self._invertible_dummy = torch.tensor(0, dtype=self._states.dtype, device=self._states.device)
+            self._invertible_dummy = torch.tensor(
+                0, dtype=self._states.dtype, device=self._states.device
+            )
             if self.world_sz > 1:
                 self._invertible_dummy = DTensor.from_local(
                     self._invertible_dummy.expand_as(self._states.to_local()),
-                    self.device_mesh, placements
+                    self.device_mesh,
+                    placements,
                 )
             else:
                 self._invertible_dummy = self._invertible_dummy.expand_as(self._states)
@@ -139,37 +178,49 @@ class DistributedQuantumDevice:
         if amplitudes.is_complex():
             loading = torch.view_as_real(amplitudes).to(self.device)
         else:
-            loading = torch.stack((amplitudes, torch.zeros_like(amplitudes)), dim=-1).to(self.device)
-        norms = torch.sqrt((loading**2).sum([i+1 for i in range(norms.ndim-1)])).reshape((-1, ) + (1, )*(loading.ndim - 1))
+            loading = torch.stack(
+                (amplitudes, torch.zeros_like(amplitudes)), dim=-1
+            ).to(self.device)
+        norms = torch.sqrt((loading**2).sum(dim=tuple(range(1, loading.ndim)))).reshape(
+            (-1,) + (1,) * (loading.ndim - 1)
+        )
 
         maybe_mesh, maybe_placements = maybe_get_dtensor_info(self._states)
-        self._states = maybe_distribute_tensor((loading/norms).reshape(self._states.shape), device_mesh=maybe_mesh, placements=maybe_placements)
+        self._states = maybe_distribute_tensor(
+            (loading / norms).reshape(self._states.shape),
+            device_mesh=maybe_mesh,
+            placements=maybe_placements,
+        )
 
     @property
-    def noncanonical_states(self) -> [Union[DTensor, torch.Tensor], torch.Tensor]:
-        '''
+    def noncanonical_states(self) -> tuple[Union[DTensor, torch.Tensor], torch.Tensor]:
+        """
         Obtain device states and groupings without canonicalization (used for measurements)
         The groupings are detached and cloned to prevent interference but the states are not to avoid unnecessary computations.
         The expectation is that someone calling this function from outside the device would modify the statevector in such a way as to result in a copy of it,
         instead of modifying inplace.
-        '''
+        """
         return self._states, self._groupings.detach().clone()
 
     def canonicalize(self):
         # self._states, self._groupings, self._invertible_dummy = self.reorder(self._states, self._groupings, self._invertible_dummy)
         # First maybe_reshard final self.log2_devices qubits
         sharded_wires = torch.nonzero(self._groupings[1] == -2).flatten()
-        wires_to_unshard = sharded_wires[sharded_wires < (self.n_wires - self.log2_devices)].tolist()
+        wires_to_unshard = sharded_wires[
+            sharded_wires < (self.n_wires - self.log2_devices)
+        ].tolist()
         do_not_shard = list(range(self.n_wires - self.log2_devices))
         for wire in wires_to_unshard:
             self.maybe_reshard(wires=[wire], ignore=do_not_shard)
         # Final qubits are all sharded (though possibly unordered); now obtain wire ordering
-        wire_order = torch.nonzero(self._groupings[0] == 1).flatten() # First wire group is always ungrouped
+        wire_order = torch.nonzero(
+            self._groupings[0] == 1
+        ).flatten()  # First wire group is always ungrouped
         for i in range(2, self.num_dims - 1):
             group_mask = self._groupings[0] == i
             group_wires = torch.nonzero(group_mask).flatten()
             if len(group_wires) > 1:
-                relative_order = self._groupings[1,group_mask].argsort()
+                relative_order = self._groupings[1, group_mask].argsort()
                 group_wires = group_wires[relative_order]
             wire_order = torch.cat((wire_order, group_wires))
         # Now interchange qubits until they are all in the proper order
@@ -178,8 +229,12 @@ class DistributedQuantumDevice:
                 continue
             else:
                 if self._invertible_dummy is not None:
-                    self._invertible_dummy,_ = self.interchange_qubits(self._invertible_dummy, self._groupings, i, wire_order[i])
-                self._states, self._groupings = self.interchange_qubits(self._states, self._groupings, i, wire_order[i])
+                    self._invertible_dummy, _ = self.interchange_qubits(
+                        self._invertible_dummy, self._groupings, i, wire_order[i]
+                    )
+                self._states, self._groupings = self.interchange_qubits(
+                    self._states, self._groupings, i, wire_order[i]
+                )
                 wire_order[wire_order == i], wire_order[i] = wire_order[i], i
 
     @property
@@ -193,7 +248,9 @@ class DistributedQuantumDevice:
             self.canonicalize()
             return self._invertible_dummy
 
-    def maybe_reshard(self, wires: list[int], ignore: list[int] = [], inverse: bool=False):
+    def maybe_reshard(
+        self, wires: list[int], ignore: list[int] = [], inverse: bool = False
+    ):
         """
         If the current sharding splits the statevector in the dimension that is acted upon by the
         gate, picks a new dimension to shard over and redistributes the statevector accordingly.
@@ -223,11 +280,16 @@ class DistributedQuantumDevice:
         """
         if self.world_sz <= 1 or not wires:
             return
-        cur_sharded_qubits = set(torch.nonzero(self._groupings[1] == -2).flatten().tolist())
+        cur_sharded_qubits = set(
+            torch.nonzero(self._groupings[1] == -2).flatten().tolist()
+        )
         overlap = set(wires) & cur_sharded_qubits
         if overlap:  # only if wires affect sharded dimensions
             new_qubit_sharding = cur_sharded_qubits - overlap
-            usable_qubits = sorted(set(range(self.n_wires)) - (set(wires) | cur_sharded_qubits | set(ignore)))
+            usable_qubits = sorted(
+                set(range(self.n_wires))
+                - (set(wires) | cur_sharded_qubits | set(ignore))
+            )
             # hardcode: 2qubit gates only
             min_wire = min(wires)
             max_wire = max(wires)
@@ -238,13 +300,17 @@ class DistributedQuantumDevice:
                 else:
                     min_wire, max_wire = max_wire, min_wire + self.n_wires
             # this happens to be the same for inverse and not!
-            best_usable_qubits = [q_ for q_ in usable_qubits if q_ > max_wire] + [q_ for q_ in usable_qubits if q_ < min_wire]
-            uncoupled_qubits = torch.nonzero(self._groupings[1] == -1).flatten().tolist()
+            best_usable_qubits = [q_ for q_ in usable_qubits if q_ > max_wire] + [
+                q_ for q_ in usable_qubits if q_ < min_wire
+            ]
+            uncoupled_qubits = (
+                torch.nonzero(self._groupings[1] == -1).flatten().tolist()
+            )
             # Select qubits to use in resharding
             if inverse:
-                switch_qubits = best_usable_qubits[:len(overlap)]
+                switch_qubits = best_usable_qubits[: len(overlap)]
             else:
-                switch_qubits = best_usable_qubits[-len(overlap):]
+                switch_qubits = best_usable_qubits[-len(overlap) :]
             already_uncoupled = list(set(uncoupled_qubits) & set(switch_qubits))
             needs_uncoupling = list(set(switch_qubits) - set(uncoupled_qubits))
             dummy_uncoupled = list(set(uncoupled_qubits) - set(switch_qubits))
@@ -253,22 +319,48 @@ class DistributedQuantumDevice:
             if needs_uncoupling:
                 for i in range(len(needs_uncoupling)):
                     if self._invertible_dummy is not None:
-                        self._invertible_dummy,_ = self.interchange_qubits(self._invertible_dummy, self._groupings, needs_uncoupling[i], dummy_uncoupled[i])
-                    self._states, self._groupings = self.interchange_qubits(self._states, self._groupings, needs_uncoupling[i], dummy_uncoupled[i])
+                        self._invertible_dummy, _ = self.interchange_qubits(
+                            self._invertible_dummy,
+                            self._groupings,
+                            needs_uncoupling[i],
+                            dummy_uncoupled[i],
+                        )
+                    self._states, self._groupings = self.interchange_qubits(
+                        self._states,
+                        self._groupings,
+                        needs_uncoupling[i],
+                        dummy_uncoupled[i],
+                    )
             # All switch qubits are now uncoupled
             for i in range(len(switch_qubits)):
                 # Interchange uncoupled selected qubits and sharded qubits in anticipation of resharding
                 if self._invertible_dummy is not None:
-                    self._invertible_dummy,_ = self.interchange_qubits(self._invertible_dummy, self._groupings, switch_qubits[i], list(overlap)[i])
-                self._states, self._groupings = self.interchange_qubits(self._states, self._groupings, switch_qubits[i], list(overlap)[i])
-                self._groupings[1,switch_qubits[i]], self._groupings[1,list(overlap)[i]] = -2, -1
+                    self._invertible_dummy, _ = self.interchange_qubits(
+                        self._invertible_dummy,
+                        self._groupings,
+                        switch_qubits[i],
+                        list(overlap)[i],
+                    )
+                self._states, self._groupings = self.interchange_qubits(
+                    self._states, self._groupings, switch_qubits[i], list(overlap)[i]
+                )
+                (
+                    self._groupings[1, switch_qubits[i]],
+                    self._groupings[1, list(overlap)[i]],
+                ) = -2, -1
             new_qubit_sharding = new_qubit_sharding.union(switch_qubits)
             # all2all
-            new_dim_sharding = [self._groupings[0, w].item() for w in new_qubit_sharding]
+            new_dim_sharding = [
+                self._groupings[0, w].item() for w in new_qubit_sharding
+            ]
             new_dim_sharding.sort()
-            self._states = self._states.redistribute(self.device_mesh, placements=[Shard(d) for d in new_dim_sharding])
+            self._states = self._states.redistribute(
+                self.device_mesh, placements=[Shard(d) for d in new_dim_sharding]
+            )
             if self._invertible_dummy is not None:
-                self._invertible_dummy = self._invertible_dummy.redistribute(self.device_mesh, placements=[Shard(d) for d in new_dim_sharding])
+                self._invertible_dummy = self._invertible_dummy.redistribute(
+                    self.device_mesh, placements=[Shard(d) for d in new_dim_sharding]
+                )
 
 
 # Give DQD methods, so we can write e.g. `qdev.ry(wires=[0])`

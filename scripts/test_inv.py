@@ -1,44 +1,48 @@
 import os
 
 import torch
-from torch.distributed.tensor import DTensor, Partial, Replicate
-from torch.autograd import gradcheck
+from torch.distributed.tensor import DTensor, Partial
 
 import tqd
 import tqd.module
+
 
 def test_inv(verbose=False):
     """
     invertible gradient
     """
-    rank = os.environ['RANK']
+    rank = os.environ["RANK"]
     nq = 3
     world_sz = 2
 
     qdev = tqd.DistributedQuantumDevice(
         nq,
-        device=f'cuda',
+        device="cuda",
         world_sz=world_sz,
         invertible=False,
     )
     qdev_i = tqd.DistributedQuantumDevice(
         nq,
-        device=f'cuda',
+        device="cuda",
         world_sz=world_sz,
         invertible=True,
     )
 
     # test registration
-    tqd.custom.register_gate('id', torch.eye(2, dtype=torch.cfloat))
-    
+    tqd.custom.register_gate("id", torch.eye(2, dtype=torch.cfloat))
+
     def fun(qdev, inp):
         func_list = [
-            {'func': 'ry', 'wires': [0], 'input_idx': [0]},
-            {'func': 'ry', 'wires': [1], 'input_idx': [1]},
-            {'func': 'ry', 'wires': [2], 'input_idx': [2]},
+            {"func": "ry", "wires": [0], "input_idx": [0]},
+            {"func": "ry", "wires": [1], "input_idx": [1]},
+            {"func": "ry", "wires": [2], "input_idx": [2]},
         ]
         enc = tqd.GeneralEncoder(func_list)
-        base_mod = [enc] + [tqd.CX(wires=[i, (i+1) % nq]) for i in range(qdev.n_wires)] + [tqd.custom.ID(wires=[1])]
+        base_mod = (
+            [enc]
+            + [tqd.CX(wires=[i, (i + 1) % nq]) for i in range(qdev.n_wires)]
+            + [tqd.custom.ID(wires=[1])]
+        )
         if qdev.invertible:
             mod = tqd.module.InvertibleUnitary(base_mod)
             mod.train()
@@ -46,56 +50,69 @@ def test_inv(verbose=False):
         else:
             enc(qdev, inp)
             if inp.device.index == 0:
-                print(f'  after enc: {qdev._states}; wire order: {qdev._wire_order}')
+                print(f"  after enc: {qdev._states}; wire order: {qdev._wire_order}")
             for m_ in base_mod[1:]:
                 m_.train()
                 m_(qdev)
                 if inp.device.index == 0:
-                    print(f'  after {type(m_).__name__}: {qdev._states}; wire order: {qdev._wire_order}')
-        #return qdev._states
+                    print(
+                        f"  after {type(m_).__name__}: {qdev._states}; wire order: {qdev._wire_order}"
+                    )
+        # return qdev._states
         meas_approx = tqd.measure_allZ(qdev, shots=0, training=True)
         return meas_approx
 
     if verbose:
-        print(f'after {rank} {qdev.states}')
-        print(f'done {qdev.states.full_tensor()}')
+        print(f"after {rank} {qdev.states}")
+        print(f"done {qdev.states.full_tensor()}")
 
     # test backprop:
-    x_i = torch.nn.Parameter(torch.tensor([[torch.pi/3, -torch.pi/3, torch.pi/6]]))
+    x_i = torch.nn.Parameter(
+        torch.tensor([[torch.pi / 3, -torch.pi / 3, torch.pi / 6]])
+    )
 
     out_i = fun(qdev_i, x_i)
-    print(f'states invertible: {torch.view_as_complex(qdev_i.states.full_tensor())}')
-    print(f'out invertible: {out_i}')
+    print(f"states invertible: {torch.view_as_complex(qdev_i.states.full_tensor())}")
+    print(f"out invertible: {out_i}")
     out_i.abs().sum().backward()
-    x_i_grad_dist = DTensor.from_local(x_i.grad, qdev_i.device_mesh, placements=[Partial()])
+    x_i_grad_dist = DTensor.from_local(
+        x_i.grad, qdev_i.device_mesh, placements=[Partial()]
+    )
     x_i_grad = x_i_grad_dist.full_tensor()
 
     # this is for when out is qdev.state (not as good a test, since it doesn't check ordering):
-    #assert torch.allclose(x_grad.cpu(), torch.tensor([[ 0.30618620, -0.30618620,  0.65973961]]))
+    # assert torch.allclose(x_grad.cpu(), torch.tensor([[ 0.30618620, -0.30618620,  0.65973961]]))
     # this is for when out is noiseless measurement:
     print(x_i_grad)
 
-    x = torch.nn.Parameter(torch.tensor([[torch.pi/3, -torch.pi/3, torch.pi/6]]))
+    x = torch.nn.Parameter(torch.tensor([[torch.pi / 3, -torch.pi / 3, torch.pi / 6]]))
     out = fun(qdev, x)
-    print(f'states: {torch.view_as_complex(qdev.states.full_tensor())}')
-    print(f'out: {out}')
+    print(f"states: {torch.view_as_complex(qdev.states.full_tensor())}")
+    print(f"out: {out}")
     out.abs().sum().backward()
     x_grad_dist = DTensor.from_local(x.grad, qdev.device_mesh, placements=[Partial()])
     x_grad = x_grad_dist.full_tensor()
     print(x_grad)
 
     assert torch.allclose(
-        torch.view_as_complex(qdev.states.full_tensor().cpu()), 
-        torch.tensor([[[[ 0.7244+0.j, -0.0647+0.j],
-            [-0.1121+0.j,  0.4183+0.j]],
-
-            [[-0.2415+0.j,  0.1941+0.j],
-            [ 0.1121+0.j, -0.4183+0.j]]]]
-        ), atol=1e-3, rtol=1e-3
+        torch.view_as_complex(qdev.states.full_tensor().cpu()),
+        torch.tensor(
+            [
+                [
+                    [[0.7244 + 0.0j, -0.0647 + 0.0j], [-0.1121 + 0.0j, 0.4183 + 0.0j]],
+                    [[-0.2415 + 0.0j, 0.1941 + 0.0j], [0.1121 + 0.0j, -0.4183 + 0.0j]],
+                ]
+            ]
+        ),
+        atol=1e-3,
+        rtol=1e-3,
     )
-    assert torch.allclose(x_grad.cpu(), torch.tensor([[-0.80801272,  1.55801260, -0.37500000]]))
-    if rank == '0':
-        print('inverse test passed!')
+    assert torch.allclose(
+        x_grad.cpu(), torch.tensor([[-0.80801272, 1.55801260, -0.37500000]])
+    )
+    if rank == "0":
+        print("inverse test passed!")
+
 
 if __name__ == "__main__":
     test_inv(False)

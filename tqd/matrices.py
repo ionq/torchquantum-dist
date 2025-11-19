@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 
+
 # batches are shape (b, 1)
 def rx_mat(params: torch.Tensor) -> torch.Tensor:
     theta = params.type(torch.complex64)
@@ -10,6 +11,7 @@ def rx_mat(params: torch.Tensor) -> torch.Tensor:
         [torch.cat([co, jsi], dim=-1), torch.cat([jsi, co], dim=-1)], dim=-2
     )
 
+
 def ry_mat(params: torch.Tensor) -> torch.Tensor:
     theta = params.type(torch.complex64)
     co = torch.cos(theta / 2)
@@ -18,35 +20,43 @@ def ry_mat(params: torch.Tensor) -> torch.Tensor:
         [torch.cat([co, -si], dim=-1), torch.cat([si, co], dim=-1)], dim=-2
     )
 
+
 def rz_mat(params: torch.Tensor) -> torch.Tensor:
     theta = params.type(torch.complex64)
     exp = torch.exp(-0.5j * theta)
-    return torch.stack([
-        torch.cat([exp, torch.zeros_like(exp)], dim=-1),
-        torch.cat([torch.zeros_like(exp), torch.conj(exp)], dim=-1)
-    ], dim=-2)
+    return torch.stack(
+        [
+            torch.cat([exp, torch.zeros_like(exp)], dim=-1),
+            torch.cat([torch.zeros_like(exp), torch.conj(exp)], dim=-1),
+        ],
+        dim=-2,
+    )
+
 
 GATE_MAT_DICT = {
-    'x': torch.tensor([[0, 1], [1, 0]], dtype=torch.complex64),
-    'y': torch.tensor([[0, -1j], [1j, 0]], dtype=torch.complex64),
-    'z': torch.tensor([[1, 0], [0, -1]], dtype=torch.complex64),
-    'i': torch.tensor([[1, 0], [0, 1]], dtype=torch.complex64),
-    'h': torch.tensor([[1, 1], [1, -1]], dtype=torch.complex64)/np.sqrt(2),
-    's': torch.tensor([[1, 0], [0, 1j]], dtype=torch.complex64),
-    't': torch.tensor([[1, 0], [0, np.cos(np.pi/4) + np.sin(np.pi/4)*1j]], dtype=torch.complex64),
-    'cx': torch.tensor(
+    "x": torch.tensor([[0, 1], [1, 0]], dtype=torch.complex64),
+    "y": torch.tensor([[0, -1j], [1j, 0]], dtype=torch.complex64),
+    "z": torch.tensor([[1, 0], [0, -1]], dtype=torch.complex64),
+    "i": torch.tensor([[1, 0], [0, 1]], dtype=torch.complex64),
+    "h": torch.tensor([[1, 1], [1, -1]], dtype=torch.complex64) / np.sqrt(2),
+    "s": torch.tensor([[1, 0], [0, 1j]], dtype=torch.complex64),
+    "t": torch.tensor(
+        [[1, 0], [0, np.cos(np.pi / 4) + np.sin(np.pi / 4) * 1j]], dtype=torch.complex64
+    ),
+    "cx": torch.tensor(
         [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 1], [0, 0, 1, 0]], dtype=torch.complex64
     ),
-    'cy': torch.tensor(
-        [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, -1j], [0, 0, 1j, 0]], dtype=torch.complex64
+    "cy": torch.tensor(
+        [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, -1j], [0, 0, 1j, 0]],
+        dtype=torch.complex64,
     ),
-    'cz': torch.tensor(
+    "cz": torch.tensor(
         [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, -1]], dtype=torch.complex64
     ),
-    'swap': torch.tensor(
+    "swap": torch.tensor(
         [[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]], dtype=torch.complex64
     ),
-    'rx': rx_mat,
-    'ry': ry_mat,
-    'rz': rz_mat,
+    "rx": rx_mat,
+    "ry": ry_mat,
+    "rz": rz_mat,
 }

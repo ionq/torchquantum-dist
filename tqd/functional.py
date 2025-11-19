@@ -8,12 +8,18 @@ from torch.distributed.tensor import DTensor
 
 from .matrices import GATE_MAT_DICT
 from .utils.interchange import interchange_qubits, interchange_dims
-from .utils.maybe_dtensor import maybe_to_local, maybe_get_dtensor_info, maybe_from_local
+from .utils.maybe_dtensor import (
+    maybe_to_local,
+    maybe_get_dtensor_info,
+    maybe_from_local,
+)
+
 
 class InvertibleUnitaryBMM(Function):
     """
     Implements an unitary batched matrix multiply as an invertible computation to save activation memory
     """
+
     @staticmethod
     def forward(ctx, matrix, state, dummy):
         # `dummy` allows passing activations thru backwards pass (in place of actual gradients)
@@ -23,7 +29,7 @@ class InvertibleUnitaryBMM(Function):
     @staticmethod
     def backward(ctx, gO, output):
         # Recompute input from output
-        matrix, = ctx.saved_tensors
+        (matrix,) = ctx.saved_tensors
         inp = matrix.mH.bmm(output)
         del output
 
@@ -34,10 +40,12 @@ class InvertibleUnitaryBMM(Function):
         backward(out, gO)
         return mtx.grad, inp.grad, inp
 
+
 class InvertiblePostUnitaryStep(Function):
     """
     No-op in forwards, but starts to pass the output back for the invertible computation
     """
+
     @staticmethod
     def forward(ctx, inp, dummy):
         # `dummy` allows passing activations thru backwards pass (in place of actual gradients)
@@ -48,13 +56,16 @@ class InvertiblePostUnitaryStep(Function):
     @staticmethod
     def backward(ctx, gO):
         # Hijacking `dummy.grad` for activations here
-        out, = ctx.saved_tensors
+        (out,) = ctx.saved_tensors
         return gO, out
 
+
 def apply_unitary_bmm(
-    state: Union[DTensor, torch.Tensor], mat: torch.Tensor,
-    wires: Union[int, list[int]], grouping: torch.Tensor,
-    invertible_dummy: Union[DTensor, torch.Tensor]=None
+    state: Union[DTensor, torch.Tensor],
+    mat: torch.Tensor,
+    wires: Union[int, list[int]],
+    grouping: torch.Tensor,
+    invertible_dummy: Union[DTensor, torch.Tensor] = None,
 ):
     """
     Apply the unitary to the statevector using local batch matrix multiply.
@@ -76,75 +87,103 @@ def apply_unitary_bmm(
         wires = [wires]
 
     # First ensure wires are ungrouped
-    eligible_ungroups = list(set(torch.nonzero(grouping[1] ==-1 ).flatten().tolist()) - set(wires))
+    eligible_ungroups = list(
+        set(torch.nonzero(grouping[1] == -1).flatten().tolist()) - set(wires)
+    )
     for wire in wires:
-        if grouping[1,wire] > -1:
+        if grouping[1, wire] > -1:
             ungroup = eligible_ungroups.pop(0)
             if invertible_dummy is not None:
-                invertible_dummy,_ = interchange_qubits(invertible_dummy, grouping, wire, ungroup)
+                invertible_dummy, _ = interchange_qubits(
+                    invertible_dummy, grouping, wire, ungroup
+                )
             state, grouping = interchange_qubits(state, grouping, wire, ungroup)
 
     num_dims = state.ndim
-    wire_dims = grouping[0,wires].tolist()
+    wire_dims = grouping[0, wires].tolist()
     # Move wire dimensions into first qubit dimensions
     for i in range(len(wires)):
-        current_dim = grouping[0,wires[i]].item()
-        if current_dim != i+1:
+        current_dim = grouping[0, wires[i]].item()
+        if current_dim != i + 1:
             if invertible_dummy is not None:
-                invertible_dummy,_ = interchange_dims(invertible_dummy, grouping, current_dim, i+1, num_dims)
-            state, grouping = interchange_dims(state, grouping, current_dim, i+1, num_dims)
+                invertible_dummy, _ = interchange_dims(
+                    invertible_dummy, grouping, current_dim, i + 1, num_dims
+                )
+            state, grouping = interchange_dims(
+                state, grouping, current_dim, i + 1, num_dims
+            )
 
     local_shape = maybe_to_local(state).shape
     bsz = local_shape[0]
     dtensor_mesh, dtensor_placements = maybe_get_dtensor_info(state)
     if invertible_dummy is not None:
-        invertible_dummy = torch.view_as_complex(maybe_to_local(invertible_dummy).contiguous()).reshape([bsz, 2**len(wires), -1])
-    permuted = torch.view_as_complex(maybe_to_local(state)).reshape([bsz, 2**len(wires), -1])
-    
-    #permuted (b, m, k)
-    #mat ([b,] n, m)
+        invertible_dummy = torch.view_as_complex(
+            maybe_to_local(invertible_dummy).contiguous()
+        ).reshape([bsz, 2 ** len(wires), -1])
+    permuted = torch.view_as_complex(maybe_to_local(state)).reshape(
+        [bsz, 2 ** len(wires), -1]
+    )
+
+    # permuted (b, m, k)
+    # mat ([b,] n, m)
     if len(mat.shape) == 2:
         # matrix no batch, state in batch mode
         expand_shape = [bsz] + list(mat.shape)
         mat = mat.expand(expand_shape)
     # both matrix and state are in batch mode
     if invertible_dummy is not None:
-        new_state, invertible_dummy = InvertibleUnitaryBMM.apply(mat, permuted, invertible_dummy)
+        new_state, invertible_dummy = InvertibleUnitaryBMM.apply(
+            mat, permuted, invertible_dummy
+        )
     else:
         new_state = mat.bmm(permuted)
 
     new_state, invertible_dummy = [
-        x if x is None else maybe_from_local(torch.view_as_real(x).reshape(local_shape), device_mesh=dtensor_mesh, placements=dtensor_placements)
+        x
+        if x is None
+        else maybe_from_local(
+            torch.view_as_real(x).reshape(local_shape),
+            device_mesh=dtensor_mesh,
+            placements=dtensor_placements,
+        )
         for x in (new_state, invertible_dummy)
     ]
 
     new_grouping = grouping
     # Rearrange dims back in place
     for i in range(len(wires)):
-        current_dim = grouping[0,wires[i]].item()
+        current_dim = grouping[0, wires[i]].item()
         if current_dim != wire_dims[i]:
             if invertible_dummy is not None:
-                invertible_dummy,_ = interchange_dims(invertible_dummy, grouping, wire_dims[i], current_dim, num_dims)
-            new_state, new_grouping = interchange_dims(new_state, new_grouping, wire_dims[i], current_dim, num_dims)
+                invertible_dummy, _ = interchange_dims(
+                    invertible_dummy, grouping, wire_dims[i], current_dim, num_dims
+                )
+            new_state, new_grouping = interchange_dims(
+                new_state, new_grouping, wire_dims[i], current_dim, num_dims
+            )
 
     return new_state, new_grouping, invertible_dummy
 
+
 def gate(
-        name_or_mat: Union[str, torch.Tensor], q_device, wires,
-        params=None, inverse=False
+    name_or_mat: Union[str, torch.Tensor], q_device, wires, params=None, inverse=False
 ):
-    '''
+    """
     Gate operation accepts either a known gate name and retrieves the corresponding matrix, or directly accepts an unnamed gate matrix.
     Automatically checks unnamed gate matrices for sizing but does NOT check for unitarity.
-    '''
+    """
     if isinstance(name_or_mat, str):
         mat = GATE_MAT_DICT[name_or_mat]
     elif isinstance(name_or_mat, torch.Tensor):
-        if not (name_or_mat.ndim == 2 and name_or_mat.shape[0] == name_or_mat.shape[1] and name_or_mat.shape[0] == 2**len(wires)):
-            raise ValueError ('Invalid gate matrix provided')
+        if not (
+            name_or_mat.ndim == 2
+            and name_or_mat.shape[0] == name_or_mat.shape[1]
+            and name_or_mat.shape[0] == 2 ** len(wires)
+        ):
+            raise ValueError("Invalid gate matrix provided")
         mat = name_or_mat
     else:
-        raise TypeError('Invalid gate type provided.')
+        raise TypeError("Invalid gate type provided.")
     if params is not None:
         if not isinstance(params, torch.Tensor):
             # this is for directly inputting parameters as a number
@@ -185,13 +224,15 @@ def gate(
     state, grouping = q_device.noncanonical_states
     func = apply_unitary_bmm
 
-    state, grouping, invertible_dummy = func(state, matrix, wires, grouping, invertible_dummy=q_device._invertible_dummy)
+    state, grouping, invertible_dummy = func(
+        state, matrix, wires, grouping, invertible_dummy=q_device._invertible_dummy
+    )
     q_device._states = state
     q_device._groupings = grouping
     q_device._invertible_dummy = invertible_dummy
+
 
 # populate namespace with functionals
 for name_ in GATE_MAT_DICT.keys():
     vars()[name_] = functools.partial(gate, name_)
     vars()[f"{name_}_inv"] = functools.partial(gate, name_, inverse=True)
-

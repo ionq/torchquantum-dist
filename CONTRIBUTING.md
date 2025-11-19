@@ -30,7 +30,7 @@ The general rule is: don't be rude and try to be constructive. The flip side is:
 
 ### IonQ
 
-[IonQ](https://ionq.co) is a quantum hardware and solutions company. Our mission is to develop the world’s best quantum technology to solve the world’s most complex problems. 
+[IonQ](https://ionq.co) is a quantum hardware and solutions company. Our mission is to develop the world’s best quantum technology to solve the world’s most complex problems.
 
 ### TorchQuantumDistributed
 
@@ -40,7 +40,7 @@ TorchQuantumDistributed bridges the worlds of quantum computing and differentiab
 
 #### Design Decisions
 
-Our broad goals for this project are for the code to be: 
+Our broad goals for this project are for the code to be:
 - both Object Oriented and Functional, whenever beneficial
 - Extensible
 - Modular
