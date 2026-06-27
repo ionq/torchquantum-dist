@@ -47,6 +47,7 @@ class InvertibleUnitary(torch.nn.Module):
                     )
                 else:
                     continue
-        qdev._states = InvertiblePostUnitaryStep.apply(
-            qdev._states, qdev._invertible_dummy
-        )
+        if qdev._invertible_dummy is not None:
+            qdev._states = InvertiblePostUnitaryStep.apply(
+                qdev._states, qdev._invertible_dummy
+            )

@@ -181,7 +181,7 @@ def measure_allZ(
 
     if shots > 0:
         if not training:
-            torch.manual_seed(q_device.shared_seed)
+            torch.cuda.manual_seed(q_device.shared_seed)
             q_device.shared_seed += 1
             sampler = sampler_nondiff_exact
         else:
