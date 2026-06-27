@@ -152,7 +152,7 @@ def apply_unitary_bmm(
     new_grouping = grouping
     # Rearrange dims back in place
     for i in range(len(wires)):
-        current_dim = grouping[0, wires[i]].item()
+        current_dim = new_grouping[0, wires[i]].item()
         if current_dim != wire_dims[i]:
             if invertible_dummy is not None:
                 invertible_dummy, _ = interchange_dims(

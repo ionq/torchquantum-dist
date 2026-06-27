@@ -145,14 +145,15 @@ def measure_allZ(
                 )
             else:  # Grouped qubits require more delicate manipulation of the statevector
                 group_size = state_mag.shape[wire_info[0].item()]
+                n_bits = int(np.log2(group_size))
                 group_bool = torch.zeros(
                     group_size, device=local_mask.device, dtype=bool
-                ).reshape((2,) * int(np.log(group_size) / np.log(2)))
+                ).reshape((2,) * n_bits)
                 # For correct relative dimension, set nonselected dimension to False
                 group_bool[
                     (slice(None),) * wire_info[1].item()
                     + (1 - post_bits[i],)
-                    + (slice(None),) * (group_size - wire_info[1].item() - 1)
+                    + (slice(None),) * (n_bits - wire_info[1].item() - 1)
                 ] = True
                 slice_idx = (
                     (slice(None),) * wire_info[0].item()
@@ -248,9 +249,14 @@ def measure_allZ(
             1, q_device.log2_devices + 1, device=remaining_dims.device
         )
         only_shard_groupings = groupings.detach().clone()
-        only_shard_groupings[0, sharded_wires] -= (
-            min(only_shard_groupings[0, sharded_wires]) - 1
-        )  # reindex sharded dimensions for reduced tensor
+        # reindex sharded dimensions for reduced tensor: after summing away
+        # non-sharded dims, surviving dims are at sequential positions 1, 2, ...
+        # ordered by the original (pre-reduction) dim index; simple subtraction
+        # is wrong when the sharded dims are non-contiguous after resharding.
+        sorted_shard_dims = sorted(only_shard_groupings[0, sharded_wires].tolist())
+        dim_map = {d: i + 1 for i, d in enumerate(sorted_shard_dims)}
+        for w in sharded_wires.tolist():
+            only_shard_groupings[0, w] = dim_map[only_shard_groupings[0, w].item()]
         for wire in sharded_wires:
             reduce_list = remaining_dims[
                 remaining_dims != only_shard_groupings[0, wire].item()
