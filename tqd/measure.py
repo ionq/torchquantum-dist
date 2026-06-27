@@ -23,8 +23,8 @@ def sampler_diff_approx(
     z = torch.randn(maybe_to_local(p).size(), device=p.device)
     e_d = torch.zeros(maybe_to_local(p).size(), device=p.device)
     if global_rank == world_sz - 1:
-        z[-1] = 0
-        e_d[-1] = 1
+        z[(-1,) * z.ndim] = 0
+        e_d[(-1,) * e_d.ndim] = 1
     p_device_mesh, p_placements = maybe_get_dtensor_info(p)
     z = maybe_from_local(z, device_mesh=p_device_mesh, placements=p_placements)
     e_d = maybe_from_local(e_d, device_mesh=p_device_mesh, placements=p_placements)

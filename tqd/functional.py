@@ -172,6 +172,7 @@ def gate(
     Gate operation accepts either a known gate name and retrieves the corresponding matrix, or directly accepts an unnamed gate matrix.
     Automatically checks unnamed gate matrices for sizing but does NOT check for unitarity.
     """
+    wires = [wires] if isinstance(wires, int) else wires
     if isinstance(name_or_mat, str):
         mat = GATE_MAT_DICT[name_or_mat]
     elif isinstance(name_or_mat, torch.Tensor):
@@ -193,7 +194,6 @@ def gate(
             params = params.unsqueeze(-1).expand((q_device.bsz, -1))
         elif params.dim() == 0:
             params = params.unsqueeze(-1).unsqueeze(-1).expand((q_device.bsz, -1))
-    wires = [wires] if isinstance(wires, int) else wires
 
     if q_device.record_op:
         q_device.op_history.append(
