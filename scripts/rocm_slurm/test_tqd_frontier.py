@@ -3,7 +3,9 @@ import sys
 
 import torch
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "tests")))
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "tests"))
+)
 from test_dqd import test_dqd, test_noisy_meas, test_encoder, test_grads
 
 if __name__ == "__main__":
