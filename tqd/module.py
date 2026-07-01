@@ -27,7 +27,9 @@ class InvertibleUnitary(torch.nn.Module):
                 wires = self.gates[i].wires
                 if len(wires) == 1 and self.error_1q > 0 and rand < self.error_1q:
                     gate(
-                        self.NOISE_GATES[(rand * 3 / self.error_1q).int().item()], qdev, wires
+                        self.NOISE_GATES[(rand * 3 / self.error_1q).int().item()],
+                        qdev,
+                        wires,
                     )
                 elif (
                     len(wires) == 2

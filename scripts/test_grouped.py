@@ -22,17 +22,17 @@ def test_grouped_gate_correctness(verbose=False):
     )
 
     # Confirm grouping path is active
-    assert (
-        qdev._groupings[1] >= 0
-    ).any(), "Expected grouped qubits for max_dtensor_dims=7, n_wires=7"
+    assert (qdev._groupings[1] >= 0).any(), (
+        "Expected grouped qubits for max_dtensor_dims=7, n_wires=7"
+    )
 
     def run_circuit(dev):
         tqd.h(dev, wires=[0])
-        dev.y(wires=[1])               # 1Q gate on grouped qubit (group 0, role 0)
-        tqd.cx(dev, wires=[1, 4])      # cross-group CX
+        dev.y(wires=[1])  # 1Q gate on grouped qubit (group 0, role 0)
+        tqd.cx(dev, wires=[1, 4])  # cross-group CX
         tqd.rz(dev, wires=[3], params=torch.pi / 3)
         tqd.ry(dev, wires=[2], params=torch.pi / 4)
-        tqd.cx(dev, wires=[3, 5])      # grouped → ungrouped CX (group 1, role 0 → q5)
+        tqd.cx(dev, wires=[3, 5])  # grouped → ungrouped CX (group 1, role 0 → q5)
         tqd.rz(dev, wires=[6], params=torch.pi / 5)
 
     run_circuit(qdev)
@@ -70,13 +70,13 @@ def test_restore_loop_regression(verbose=False):
     def run_circuit(dev):
         tqd.h(dev, wires=[1])
         tqd.h(dev, wires=[3])
-        tqd.cx(dev, wires=[1, 4])      # group 0 → group 1
-        tqd.cx(dev, wires=[4, 1])      # reversed: group 1 → group 0
-        tqd.cx(dev, wires=[3, 2])      # group 1 → group 0, reversed-index order
-        tqd.cx(dev, wires=[2, 3])      # group 0 → group 1
+        tqd.cx(dev, wires=[1, 4])  # group 0 → group 1
+        tqd.cx(dev, wires=[4, 1])  # reversed: group 1 → group 0
+        tqd.cx(dev, wires=[3, 2])  # group 1 → group 0, reversed-index order
+        tqd.cx(dev, wires=[2, 3])  # group 0 → group 1
         tqd.rz(dev, wires=[1], params=torch.pi / 5)
-        tqd.cx(dev, wires=[0, 2])      # ungrouped → grouped
-        tqd.cx(dev, wires=[4, 5])      # grouped → ungrouped
+        tqd.cx(dev, wires=[0, 2])  # ungrouped → grouped
+        tqd.cx(dev, wires=[4, 5])  # grouped → ungrouped
 
     run_circuit(qdev)
     run_circuit(qdev_ref)
@@ -106,7 +106,9 @@ def test_grouped_postselection(verbose=False):
     )
 
     grouped_wires = torch.nonzero(qdev._groupings[1] >= 0).flatten().tolist()
-    assert len(grouped_wires) > 0, "Expected grouped qubits for max_dtensor_dims=7, n_wires=7"
+    assert len(grouped_wires) > 0, (
+        "Expected grouped qubits for max_dtensor_dims=7, n_wires=7"
+    )
 
     tqd.h(qdev, wires=[0])
     tqd.ry(qdev, wires=[grouped_wires[0]], params=torch.pi / 3)
@@ -118,7 +120,9 @@ def test_grouped_postselection(verbose=False):
     assert meas.shape == (1, nq), f"Unexpected meas shape: {meas.shape}"
     # retained is a DTensor when world_sz > 1; gather before indexing
     retained_cpu = retained.full_tensor().cpu()
-    assert retained_cpu.shape == (1,), f"Unexpected retained shape: {retained_cpu.shape}"
+    assert retained_cpu.shape == (1,), (
+        f"Unexpected retained shape: {retained_cpu.shape}"
+    )
     assert retained_cpu[0].item(), "Expected batch element retained after postselection"
     assert abs(meas[0, post_wire].item() - 1.0) < 1e-5, (
         f"Expected <Z>=1.0 for postselected wire {post_wire}, got {meas[0, post_wire].item():.6f}"
