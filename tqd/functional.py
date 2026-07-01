@@ -152,7 +152,7 @@ def apply_unitary_bmm(
     new_grouping = grouping
     # Rearrange dims back in place
     for i in range(len(wires)):
-        current_dim = grouping[0, wires[i]].item()
+        current_dim = new_grouping[0, wires[i]].item()
         if current_dim != wire_dims[i]:
             if invertible_dummy is not None:
                 invertible_dummy, _ = interchange_dims(
@@ -172,6 +172,7 @@ def gate(
     Gate operation accepts either a known gate name and retrieves the corresponding matrix, or directly accepts an unnamed gate matrix.
     Automatically checks unnamed gate matrices for sizing but does NOT check for unitarity.
     """
+    wires = [wires] if isinstance(wires, int) else wires
     if isinstance(name_or_mat, str):
         mat = GATE_MAT_DICT[name_or_mat]
     elif isinstance(name_or_mat, torch.Tensor):
@@ -193,7 +194,6 @@ def gate(
             params = params.unsqueeze(-1).expand((q_device.bsz, -1))
         elif params.dim() == 0:
             params = params.unsqueeze(-1).unsqueeze(-1).expand((q_device.bsz, -1))
-    wires = [wires] if isinstance(wires, int) else wires
 
     if q_device.record_op:
         q_device.op_history.append(

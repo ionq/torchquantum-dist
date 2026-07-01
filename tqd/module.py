@@ -27,14 +27,16 @@ class InvertibleUnitary(torch.nn.Module):
                 wires = self.gates[i].wires
                 if len(wires) == 1 and self.error_1q > 0 and rand < self.error_1q:
                     gate(
-                        self.NOISE_GATES[(rand * 3 / self.error_1q).int()], qdev, wires
+                        self.NOISE_GATES[(rand * 3 / self.error_1q).int().item()],
+                        qdev,
+                        wires,
                     )
                 elif (
                     len(wires) == 2
                     and self.error_2q > 0
                     and rand < self.error_2q * 16 / 15
                 ):
-                    randint = (rand * 15 / self.error_2q).int()
+                    randint = (rand * 15 / self.error_2q).int().item()
                     randix1 = randint % 4
                     randix2 = randint // 4
                     gate(
@@ -47,6 +49,7 @@ class InvertibleUnitary(torch.nn.Module):
                     )
                 else:
                     continue
-        qdev._states = InvertiblePostUnitaryStep.apply(
-            qdev._states, qdev._invertible_dummy
-        )
+        if qdev._invertible_dummy is not None:
+            qdev._states = InvertiblePostUnitaryStep.apply(
+                qdev._states, qdev._invertible_dummy
+            )
