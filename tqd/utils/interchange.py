@@ -10,7 +10,7 @@ def interchange_qubits(
 ) -> tuple[Union[DTensor, torch.Tensor], torch.Tensor]:
     """
     Interchanges two qubits within a given statevector. Does not reshard on its own and can only interchange sharded qubits with ungrouped qubits.
-    Operates recurseively based on a few base interchange patterns.
+    Operates recursively based on a few base interchange patterns.
     Args:
         state: Tensor or DTensor containing state information
         grouping: grouping information for state
@@ -140,7 +140,7 @@ def interchange_dims(
 ) -> tuple[Union[DTensor, torch.Tensor], torch.Tensor]:
     """
     Interchanges two tensor dimensions, either groups of qubits or ungrouped qubits, and updates grouping tensor
-    Note that relative orders within dimensions (or designations of ungrouped or sharded qubits, remain unchanged
+    Note that relative orders within dimensions (or designations of ungrouped or sharded qubits) remain unchanged
     Args:
         state: Tensor or DTensor containing state info. Must contain num_dims dims
         grouping: Tensor containing grouping info for state

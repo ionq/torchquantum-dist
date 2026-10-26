@@ -42,7 +42,7 @@ class Op(torch.nn.Module):
         )
 
 
-# Factory that programattically creates RY from ry, CX from cx, etc
+# Factory that programmatically creates RY from ry, CX from cx, etc
 def OpFactory(name, module, has_params=True, trainable=True):
     """
     `name` is lower case
